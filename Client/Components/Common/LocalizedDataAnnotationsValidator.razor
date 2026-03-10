@@ -1,0 +1,299 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Client.Services
+@using System.ComponentModel.DataAnnotations
+@using System.Reflection
+@using Shared.Common.Validation
+@inherits ComponentBase
+@inject II18nService I18n
+@implements IDisposable
+
+@code {
+    [CascadingParameter]
+    private EditContext? CurrentEditContext { get; set; }
+
+    private ValidationMessageStore? _messageStore;
+
+    protected override void OnInitialized()
+    {
+        if (CurrentEditContext == null)
+        {
+            throw new InvalidOperationException(
+            $"{nameof(LocalizedDataAnnotationsValidator)} requires a cascading parameter " +
+            $"of type {nameof(EditContext)}. For example, you can use {nameof(LocalizedDataAnnotationsValidator)} " +
+            $"inside an EditForm.");
+        }
+
+        _messageStore = new ValidationMessageStore(CurrentEditContext);
+
+        // Subscribe to validation events
+        CurrentEditContext.OnValidationRequested += OnValidationRequested;
+        CurrentEditContext.OnFieldChanged += OnFieldChanged;
+
+        // Subscribe to language changes
+        I18n.OnLanguageChanged += OnLanguageChanged;
+    }
+
+    private void OnLanguageChanged()
+    {
+        // Re-localize all current validation messages when language changes
+        _messageStore?.Clear();
+        LocalizeValidationMessages();
+    }
+
+    private void OnValidationRequested(object? sender, ValidationRequestedEventArgs e)
+    {
+        _messageStore?.Clear();
+        LocalizeValidationMessages();
+    }
+
+    private void OnFieldChanged(object? sender, FieldChangedEventArgs e)
+    {
+        // Clear and revalidate when field changes
+        _messageStore?.Clear(e.FieldIdentifier);
+        ValidateField(e.FieldIdentifier);
+        CurrentEditContext?.NotifyValidationStateChanged();
+    }
+
+    private void ValidateField(FieldIdentifier fieldIdentifier)
+    {
+        if (CurrentEditContext == null || _messageStore == null)
+            return;
+
+        var propertyInfo = fieldIdentifier.Model.GetType().GetProperty(fieldIdentifier.FieldName);
+        if (propertyInfo == null)
+            return;
+
+        var propertyValue = propertyInfo.GetValue(fieldIdentifier.Model);
+        var validationContext = new ValidationContext(fieldIdentifier.Model)
+        {
+            MemberName = fieldIdentifier.FieldName
+        };
+
+        var validationResults = new List<ValidationResult>();
+        Validator.TryValidateProperty(propertyValue, validationContext, validationResults);
+
+        foreach (var validationResult in validationResults)
+        {
+            var localizedMessage = GetLocalizedMessage(
+            fieldIdentifier.Model,
+            fieldIdentifier.FieldName,
+            validationResult.ErrorMessage ?? "");
+
+            _messageStore.Add(fieldIdentifier, localizedMessage);
+        }
+    }
+
+    private void LocalizeValidationMessages()
+    {
+        if (CurrentEditContext == null || _messageStore == null)
+            return;
+
+        var validationResults = new List<ValidationResult>();
+        var validationContext = new ValidationContext(CurrentEditContext.Model);
+
+        // Run DataAnnotations validation
+        Validator.TryValidateObject(
+        CurrentEditContext.Model,
+        validationContext,
+        validationResults,
+        validateAllProperties: true);
+
+        // Map validation results to localized messages
+        foreach (var validationResult in validationResults)
+        {
+            foreach (var memberName in validationResult.MemberNames)
+            {
+                var fieldIdentifier = new FieldIdentifier(CurrentEditContext.Model, memberName);
+                var localizedMessage = GetLocalizedMessage(
+                CurrentEditContext.Model,
+                memberName,
+                validationResult.ErrorMessage ?? "");
+
+                _messageStore.Add(fieldIdentifier, localizedMessage);
+            }
+        }
+
+        CurrentEditContext.NotifyValidationStateChanged();
+    }
+
+    private string GetLocalizedMessage(object model, string propertyName, string originalMessage)
+    {
+        var propertyInfo = model.GetType().GetProperty(propertyName);
+        if (propertyInfo == null)
+            return originalMessage;
+
+        // Get all validation attributes
+        var attributes = propertyInfo.GetCustomAttributes<ValidationAttribute>(true);
+
+        foreach (var attribute in attributes)
+        {
+            var validationContext = new ValidationContext(model) { MemberName = propertyName };
+            var result = attribute.GetValidationResult(propertyInfo.GetValue(model), validationContext);
+
+            if (result != ValidationResult.Success)
+            {
+                return attribute switch
+                {
+                    RequiredAttribute => GetRequiredMessage(propertyName),
+                    EmailAddressAttribute => I18n.GetValidation("emailAddress"),
+                    MaxLengthAttribute maxLength => GetMaxLengthMessage(propertyName, maxLength.Length),
+                    MinLengthAttribute minLength => GetMinLengthMessage(propertyName, minLength.Length),
+                    StringLengthAttribute stringLength => GetStringLengthMessage(propertyName, stringLength.MinimumLength,
+                    stringLength.MaximumLength),
+                    RangeAttribute range => GetRangeMessage(propertyName, range.Minimum, range.Maximum),
+                    CompareAttribute compare => GetCompareMessage(propertyName, compare.OtherProperty),
+                    RegularExpressionAttribute => GetRegularExpressionMessage(propertyName),
+                    UrlAttribute => GetUrlMessage(propertyName),
+                    MinimumAgeAttribute => GetMinimumAgeMessage(propertyName),
+                    MinimumAgeFromDateAttribute => GetMinimumAgeFromDateMessage(propertyName),
+                    MustBeTrueAttribute => GetMustBeTrueMessage(propertyName),
+                    _ => originalMessage
+                };
+            }
+        }
+
+        return originalMessage;
+    }
+
+    private string GetRequiredMessage(string propertyName)
+    {
+        // Try to find a specific key for the property
+        var specificKey = $"{ToCamelCase(propertyName)}Required";
+        var message = I18n.GetValidation(specificKey);
+
+        // If no specific key found, use generic required message
+        return message == specificKey ? I18n.GetValidation("required") : message;
+    }
+
+    private string GetMaxLengthMessage(string propertyName, int maxLength)
+    {
+        var specificKey = $"{ToCamelCase(propertyName)}MaxLength";
+        var message = I18n.GetValidation(specificKey);
+
+        if (message == specificKey)
+        {
+            message = I18n.GetValidation("maxLength");
+            return message.Replace("{0}", maxLength.ToString());
+        }
+
+        return message;
+    }
+
+    private string GetMinLengthMessage(string propertyName, int minLength)
+    {
+        var message = I18n.GetValidation("minLength");
+        return message.Replace("{0}", minLength.ToString());
+    }
+
+    private string GetStringLengthMessage(string propertyName, int minLength, int maxLength)
+    {
+        var specificKey = $"{ToCamelCase(propertyName)}Length";
+        var message = I18n.GetValidation(specificKey);
+
+        if (message == specificKey)
+        {
+            message = I18n.GetValidation("stringLength");
+            return message.Replace("{1}", maxLength.ToString()).Replace("{2}", minLength.ToString());
+        }
+
+        return message;
+    }
+
+    private string GetRangeMessage(string propertyName, object minimum, object maximum)
+    {
+        var specificKey = $"{ToCamelCase(propertyName)}Range";
+        var message = I18n.GetValidation(specificKey);
+
+        if (message == specificKey)
+        {
+            message = I18n.GetValidation("range");
+            return message.Replace("{1}", minimum.ToString() ?? "").Replace("{2}", maximum.ToString() ?? "");
+        }
+
+        return message;
+    }
+
+    private string GetCompareMessage(string propertyName, string otherProperty)
+    {
+        // For password confirmation
+        if (propertyName.Contains("Confirm", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("Password", StringComparison.OrdinalIgnoreCase))
+        {
+            return I18n.GetValidation("passwordsDoNotMatch");
+        }
+
+        return I18n.GetValidation("compare");
+    }
+
+    private string GetRegularExpressionMessage(string propertyName)
+    {
+        // Try to find a specific key for the property
+        var specificKey = $"{ToCamelCase(propertyName)}InvalidCharacters";
+        var message = I18n.GetValidation(specificKey);
+
+        // If no specific key found, use generic invalid format message
+        return message == specificKey ? I18n.GetValidation("invalidFormat") : message;
+    }
+
+    private string GetUrlMessage(string propertyName)
+    {
+        // Try to find a specific key for the property
+        var specificKey = $"{ToCamelCase(propertyName)}Invalid";
+        var message = I18n.GetValidation(specificKey);
+
+        // If no specific key found, use generic url message
+        return message == specificKey ? I18n.GetValidation("url") : message;
+    }
+
+    private string GetMinimumAgeMessage(string propertyName)
+    {
+        // For birthYear, use specific message
+        if (propertyName.Equals("BirthYear", StringComparison.OrdinalIgnoreCase))
+        {
+            return I18n.GetValidation("birthYearRange");
+        }
+
+        return I18n.GetValidation("invalidFormat");
+    }
+
+    private string GetMustBeTrueMessage(string propertyName)
+    {
+        // Try to find a specific key for the property
+        var specificKey = $"{ToCamelCase(propertyName)}Required";
+        var message = I18n.GetValidation(specificKey);
+
+        // If no specific key found, use generic required message
+        return message == specificKey ? I18n.GetValidation("required") : message;
+    }
+
+    private string GetMinimumAgeFromDateMessage(string propertyName)
+    {
+        // For birthDate, use specific message
+        if (propertyName.Equals("BirthDate", StringComparison.OrdinalIgnoreCase))
+        {
+            return I18n.GetValidation("birthDateAge");
+        }
+
+        return I18n.GetValidation("invalidFormat");
+    }
+
+    private static string ToCamelCase(string value)
+    {
+        if (string.IsNullOrEmpty(value) || char.IsLower(value[0]))
+            return value;
+
+        return char.ToLowerInvariant(value[0]) + value.Substring(1);
+    }
+
+    public void Dispose()
+    {
+        if (CurrentEditContext != null)
+        {
+            CurrentEditContext.OnValidationRequested -= OnValidationRequested;
+            CurrentEditContext.OnFieldChanged -= OnFieldChanged;
+        }
+
+        // Unsubscribe from language changes
+        I18n.OnLanguageChanged -= OnLanguageChanged;
+    }
+}

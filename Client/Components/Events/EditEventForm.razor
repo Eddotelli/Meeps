@@ -1,0 +1,448 @@
+@using Shared.Contracts.Events
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Common
+@using Microsoft.AspNetCore.Components.Forms
+@using Shared.Contracts.Locations
+@inject II18nService I18n
+@inject IUsersApiClient UsersApiClient
+@inject IEventsApiClient EventsApiClient
+
+<EditForm Model="@UpdateEventRequest" OnSubmit="@HandleSubmit">
+    <LocalizedDataAnnotationsValidator />
+
+    <MudGrid>
+        @* Left Column - Event Image *@
+        <MudItem xs="12" md="4" Class="d-flex flex-column">
+            <div class="event-image-wrapper">
+                <div class="modern-section-header mb-3">
+                    <div class="section-title-wrapper">
+                        <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("eventImage")</MudText>
+                        <div class="title-accent"></div>
+                    </div>
+                </div>
+                <ImageUploadGenerator Context="Event" InitialImageUrl="@UpdateEventRequest.ImageUrl"
+                                      OnImageChanged="HandleImageChanged" OnBase64ImageGenerated="HandleBase64ImageGenerated"
+                                      MaxParticipants="@MaxAttendanceValue" EventTitle="@UpdateEventRequest.Title"
+                                      EventDescription="@UpdateEventRequest.Description" MinAge="@MinAgeValue" MaxAge="@MaxAgeValue"
+                                      GenderRestriction="@UpdateEventRequest.GenderRestriction"
+                                      CategoryId="@UpdateEventRequest.CategoryId" />
+            </div>
+        </MudItem>
+
+        @* Right Column - Event Details *@
+        <MudItem xs="12" md="8">
+            <div class="modern-section-header mb-3">
+                <div class="section-title-wrapper">
+                    <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("eventDetails")</MudText>
+                    <div class="title-accent"></div>
+                </div>
+            </div>
+
+            @* Show constraint warnings *@
+            @if (editConstraints != null && editConstraints.Warnings.Any())
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3">
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        <strong>@I18n.GetMessage("editConstraintsInfo")</strong>
+                    </MudText>
+                    <ul class="mb-0" style="padding-left: 20px;">
+                        @foreach (var warning in editConstraints.Warnings)
+                        {
+                            <li>@GetLocalizedWarning(warning)</li>
+                        }
+                    </ul>
+                </MudAlert>
+            }
+
+            <MudTextField @bind-Value="UpdateEventRequest.Title" For="@(() => UpdateEventRequest.Title)"
+                          Label="@I18n.GetCommon("title")" Variant="Variant.Outlined" Immediate="true" Required="true"
+                          Class="@($"mb-3 {(!string.IsNullOrWhiteSpace(UpdateEventRequest.Title) ? "validated-field" : "")}")"
+                          HelperText="@I18n.GetHelpText("eventTitle")" />
+
+            <MudTextField @bind-Value="UpdateEventRequest.Description" For="@(() => UpdateEventRequest.Description)"
+                          Label="@I18n.GetCommon("description")" Variant="Variant.Outlined" Lines="4" Immediate="true"
+                          Required="true"
+                          Class="@($"mb-3 {(!string.IsNullOrWhiteSpace(UpdateEventRequest.Description) ? "validated-field" : "")}")"
+                          HelperText="@I18n.GetHelpText("eventDescription")" />
+
+            @* Location selector with map *@
+            <AddressSearch OnLocationSelected="HandleLocationSelected" ShowMap="true"
+                           InitialCity="@UpdateEventRequest.Location" InitialLatitude="@UpdateEventRequest.Latitude"
+                           InitialLongitude="@UpdateEventRequest.Longitude" Required="true" Class="mb-3" />
+
+            <div class="d-flex gap-3 mb-3">
+                <MudDatePicker @bind-Date="eventDate" @bind-Date:after="CombineDateTime" Label="@I18n.GetCommon("date")"
+                               Variant="Variant.Outlined" MinDate="@DateTime.Today" Editable="false" Required="true"
+                               Class="@(eventDate.HasValue ? "validated-field" : "")" />
+
+                <MudTimePicker @bind-Time="eventTime" @bind-Time:after="CombineDateTime" Label="@I18n.GetCommon("time")"
+                               Variant="Variant.Outlined" Editable="false" Required="true"
+                               Class="@(eventTime.HasValue ? "validated-field" : "")" />
+            </div>
+
+            <div class="d-flex gap-3 mb-3">
+                <MudSelect @bind-Value="UpdateEventRequest.CategoryId" For="@(() => UpdateEventRequest.CategoryId)"
+                           Label="@I18n.GetCommon("category")" Variant="Variant.Outlined" Immediate="true" Required="true"
+                           Class="@(UpdateEventRequest.CategoryId.HasValue ? "validated-field" : "")" FullWidth="true"
+                           T="int?">
+                    @foreach (var category in Categories)
+                    {
+                        <MudSelectItem Value="@((int?)category.Id)">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@CategoryIconHelper.GetIconForCategory((CategoryType)category.Id)"
+                                         Size="Size.Small"
+                                         Color="@CategoryIconHelper.GetColorForCategory((CategoryType)category.Id)" />
+                                <span>@category.Name</span>
+                            </div>
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudSelect @bind-Value="UpdateEventRequest.GenderRestriction"
+                           For="@(() => UpdateEventRequest.GenderRestriction)" Label="@I18n.GetCommon("genderRestriction")"
+                           Variant="Variant.Outlined" Immediate="true" Required="true"
+                           Class="@(UpdateEventRequest.GenderRestriction.HasValue ? "validated-field" : "")" FullWidth="true"
+                           Disabled="@(editConstraints?.HasMixedGenders ?? false)" T="GenderRestriction?">
+                    @foreach (var restriction in GetAllowedGenderRestrictions())
+                    {
+                        <MudSelectItem Value="@((GenderRestriction?)restriction)">
+                            @I18n.GetCommon(restriction.GetLocalizationKey())
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            <div class="d-flex gap-3 mb-3">
+                <div class="flex-grow-1">
+                    <RangeSlider Label="@I18n.GetCommon("numberOfParticipants")"
+                                 Type="RangeSlider.SliderType.Participants" Min="1" Max="20"
+                                 MaxValueMin="@GetMinAllowedMaxAttendance()" @bind-MinValue="MinAttendanceValue"
+                                 @bind-MaxValue="MaxAttendanceValue" />
+                </div>
+                <div class="flex-grow-1">
+                    <RangeSlider Label="@I18n.GetCommon("ageRange")" Type="RangeSlider.SliderType.Age" Min="18" Max="99"
+                                 MinValueMax="@GetMinAllowedAge()" MaxValueMin="@GetMaxAllowedAge()" @bind-MinValue="MinAgeValue"
+                                 @bind-MaxValue="MaxAgeValue" UserAge="@userAge"
+                                 Disabled="@(!userAge.HasValue || IsAgeLocked())" />
+                </div>
+            </div>
+
+            @if (!userAge.HasValue)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Info" Class="mb-3">
+                    @I18n.GetMessage("addBirthDateForAgeRestriction")
+                </MudText>
+            }
+
+            <div class="d-flex gap-4 mb-3">
+                <div class="flex-grow-1">
+                    <MudSwitch @bind-Value="UpdateEventRequest.IsPublic" For="@(() => UpdateEventRequest.IsPublic)"
+                               Color="@(UpdateEventRequest.IsPublic? Color.Success: Color.Error)"
+                               Label="@I18n.GetCommon("publicEvent")" />
+                    <MudText Typo="Typo.caption" Color="Color.Default" Class="mt-1">
+                        @I18n.GetHelpText("publicEvent")
+                    </MudText>
+                </div>
+                <div class="flex-grow-1">
+                    <MudSwitch @bind-Value="UpdateEventRequest.OnlyVerifiedUsers"
+                               For="@(() => UpdateEventRequest.OnlyVerifiedUsers)"
+                               Color="@(UpdateEventRequest.OnlyVerifiedUsers? Color.Success: Color.Error)"
+                               Label="@I18n.GetCommon("onlyVerifiedUsers")" Disabled="@(!CanRequireVerifiedUsers())" />
+                    <MudText Typo="Typo.caption" Color="Color.Default" Class="mt-1">
+                        @I18n.GetHelpText("onlyVerifiedUsers")
+                    </MudText>
+                </div>
+            </div>
+
+            @if (!CanRequireVerifiedUsers())
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-3">
+                    @(isUserVerified ? I18n.GetMessage("cannotRequireVerificationUnverified") :
+                I18n.GetMessage("mustBeVerifiedToUseThisFeature"))
+                </MudText>
+            }
+
+            <MudStack Row="true" Spacing="2" Class="mt-3">
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@IsLoading" FullWidth="true">
+                    <Spinner IsLoading="@IsLoading" LoadingText="@I18n.GetCommon("saving")"
+                             DefaultText="@I18n.GetCommon("save")" />
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="@HandleCancel"
+                           Disabled="@IsLoading" FullWidth="true">
+                    @I18n.GetCommon("cancel")
+                </MudButton>
+            </MudStack>
+        </MudItem>
+    </MudGrid>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired]
+    public UpdateEventRequest UpdateEventRequest { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public List<CategoryDto> Categories { get; set; } = new();
+
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    [Parameter]
+    public EventCallback<UpdateEventRequest> OnSubmit { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private DateTime? eventDate;
+    private TimeSpan? eventTime;
+    private int? userAge;
+    private bool isUserVerified = false;
+    private bool isPrivateEvent = false; // Inverted: true = private (IsPublic=false), false = public (IsPublic=true)
+    private GetEventEditConstraintsResponse? editConstraints;
+
+    private int _minAttendanceValue = 1;
+    private int MinAttendanceValue
+    {
+        get => _minAttendanceValue;
+        set
+        {
+            if (_minAttendanceValue != value)
+            {
+                _minAttendanceValue = value;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private int _maxAttendanceValue = 20;
+    private int MaxAttendanceValue
+    {
+        get => _maxAttendanceValue;
+        set
+        {
+            if (_maxAttendanceValue != value)
+            {
+                _maxAttendanceValue = value;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private int _minAgeValue = 18;
+    private int MinAgeValue
+    {
+        get => _minAgeValue;
+        set
+        {
+            if (_minAgeValue != value)
+            {
+                _minAgeValue = value;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private int _maxAgeValue = 99;
+    private int MaxAgeValue
+    {
+        get => _maxAgeValue;
+        set
+        {
+            if (_maxAgeValue != value)
+            {
+                _maxAgeValue = value;
+                StateHasChanged();
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load user profile to get age and verified status
+        var profileResult = await UsersApiClient.GetUserProfileAsync();
+        if (profileResult.IsSuccess)
+        {
+            isUserVerified = profileResult.Value.IsVerified;
+
+            if (profileResult.Value.BirthDate.HasValue)
+            {
+                var birthDate = profileResult.Value.BirthDate.Value;
+                var today = DateTime.Today;
+                var age = today.Year - birthDate.Year;
+                if (birthDate.Date > today.AddYears(-age)) age--;
+                userAge = age;
+            }
+        }
+
+        // Load edit constraints if editing existing event
+        if (UpdateEventRequest.EventId > 0)
+        {
+            var constraintsResult = await EventsApiClient.GetEventEditConstraintsAsync(UpdateEventRequest.EventId);
+            if (constraintsResult.IsSuccess)
+            {
+                editConstraints = constraintsResult.Value;
+                ApplyEditConstraints();
+            }
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (UpdateEventRequest.DateTime.HasValue)
+        {
+            // Convert UTC from server to local time for editing
+            var dt = UpdateEventRequest.DateTime.Value.ToLocalTime();
+            eventDate = dt.Date;
+            eventTime = dt.TimeOfDay;
+        }
+
+        // Sync slider values with request
+        MinAttendanceValue = UpdateEventRequest.MinAttendance ?? 1;
+        MaxAttendanceValue = UpdateEventRequest.MaxAttendance ?? 20;
+
+        MinAgeValue = UpdateEventRequest.MinAge ?? 18;
+        MaxAgeValue = UpdateEventRequest.MaxAge ?? 99;
+
+        // Sync private event switch (inverted)
+        isPrivateEvent = !UpdateEventRequest.IsPublic;
+    }
+
+    private void HandleLocationSelected(LocationSearchResult? location)
+    {
+        if (location != null)
+        {
+            UpdateEventRequest.Location = location.DisplayName;
+            UpdateEventRequest.Latitude = location.Latitude;
+            UpdateEventRequest.Longitude = location.Longitude;
+        }
+    }
+
+    private void CombineDateTime()
+    {
+        if (eventDate.HasValue && eventTime.HasValue)
+        {
+            // Combine as local time - server will convert to UTC
+            UpdateEventRequest.DateTime = eventDate.Value.Date.Add(eventTime.Value);
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        // Sync private event switch back to request (inverted)
+        UpdateEventRequest.IsPublic = !isPrivateEvent;
+
+        // Sync slider values to request
+        UpdateEventRequest.MinAttendance = MinAttendanceValue;
+        UpdateEventRequest.MaxAttendance = MaxAttendanceValue;
+
+        // Only save age restriction if user has set their age
+        if (userAge.HasValue)
+        {
+            UpdateEventRequest.MinAge = MinAgeValue;
+            UpdateEventRequest.MaxAge = MaxAgeValue;
+        }
+        else
+        {
+            UpdateEventRequest.MinAge = null;
+            UpdateEventRequest.MaxAge = null;
+        }
+
+        await OnSubmit.InvokeAsync(UpdateEventRequest);
+    }
+
+    private async Task HandleCancel()
+    {
+        await OnCancel.InvokeAsync();
+    }
+
+    private void HandleImageChanged(string imageUrl)
+    {
+        UpdateEventRequest.ImageUrl = imageUrl;
+        StateHasChanged();
+    }
+
+    private void HandleBase64ImageGenerated(string base64Data)
+    {
+        UpdateEventRequest.Base64Image = base64Data;
+        StateHasChanged();
+    }
+
+    private void ApplyEditConstraints()
+    {
+        if (editConstraints == null) return;
+
+        // Clamp age values within allowed range
+        if (editConstraints.MinAllowedAge.HasValue && MinAgeValue > editConstraints.MinAllowedAge.Value)
+        {
+            MinAgeValue = editConstraints.MinAllowedAge.Value;
+        }
+
+        if (editConstraints.MaxAllowedAge.HasValue && MaxAgeValue < editConstraints.MaxAllowedAge.Value)
+        {
+            MaxAgeValue = editConstraints.MaxAllowedAge.Value;
+        }
+
+        // Clamp max attendance to minimum required
+        if (editConstraints.MinAllowedMaxAttendance > 0 && MaxAttendanceValue < editConstraints.MinAllowedMaxAttendance)
+        {
+            MaxAttendanceValue = editConstraints.MinAllowedMaxAttendance;
+        }
+    }
+
+    // Returns youngest participant's age (MinAge cannot exceed this)
+    private int? GetMinAllowedAge() => editConstraints?.MinAllowedAge;
+
+    // Returns oldest participant's age (MaxAge cannot be below this)
+    private int? GetMaxAllowedAge() => editConstraints?.MaxAllowedAge;
+
+    // Returns current participant count (MaxAttendance cannot be below this)
+    private int? GetMinAllowedMaxAttendance() => editConstraints?.MinAllowedMaxAttendance;
+
+    private bool IsAgeLocked()
+    {
+        // If no age constraints exist (both are null), age range is not locked
+        if (editConstraints == null) return false;
+        if (!editConstraints.MinAllowedAge.HasValue) return false;
+        if (!editConstraints.MaxAllowedAge.HasValue) return false;
+
+        // Age range is locked only if both have values and they're equal
+        return editConstraints.MinAllowedAge == editConstraints.MaxAllowedAge;
+    }
+
+    private bool CanRequireVerifiedUsers()
+    {
+        if (!isUserVerified) return false;
+        return editConstraints?.CanRequireVerifiedUsers ?? true;
+    }
+
+    private List<GenderRestriction> GetAllowedGenderRestrictions()
+    {
+        if (editConstraints?.AllowedGenderRestrictions.Any() == true)
+        {
+            return editConstraints.AllowedGenderRestrictions;
+        }
+        return GenderRestrictionExtensions.GetAll().ToList();
+    }
+
+    private string GetLocalizedWarning(ConstraintWarning warning)
+    {
+        var message = I18n.GetMessage(warning.Key);
+
+        // Replace parameters in the message
+        foreach (var param in warning.Parameters)
+        {
+            message = message.Replace($"{{{param.Key}}}", param.Value.ToString());
+        }
+
+        return message;
+    }
+
+    public class CategoryDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,490 @@
+{
+  "info": {
+    "_postman_id": "get-eligible-events-tests",
+    "name": "Get Eligible Events Tests",
+    "description": "Test collection for GET /api/events/eligible endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Eligible Events - Success With Location",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has pagination info\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('events');",
+              "    pm.expect(response).to.have.property('totalCount');",
+              "    pm.expect(response).to.have.property('pageNumber');",
+              "    pm.expect(response).to.have.property('pageSize');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?latitude=59.3293&longitude=18.0686&radiusKm=50&pageNumber=1&pageSize=20&sortBy=distance",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "50"
+            },
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "distance"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Success Without Location",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has pagination info\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('events');",
+              "    pm.expect(response).to.have.property('totalCount');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?pageNumber=1&pageSize=20&sortBy=date",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "date"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Invalid PageNumber",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions page number\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('page');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?pageNumber=0&pageSize=20&sortBy=date",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "pageNumber",
+              "value": "0"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "date"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Invalid PageSize",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions page size\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('page');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?pageNumber=1&pageSize=150&sortBy=date",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "150"
+            },
+            {
+              "key": "sortBy",
+              "value": "date"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Invalid SortBy",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions sortby\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('sort');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?pageNumber=1&pageSize=20&sortBy=invalid",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "invalid"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Latitude Without Longitude",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions longitude\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('longitude');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?latitude=59.3293&pageNumber=1&pageSize=20&sortBy=distance",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "distance"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Longitude Without Latitude",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions latitude\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('latitude');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?longitude=18.0686&pageNumber=1&pageSize=20&sortBy=distance",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "distance"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Filter By Category",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Events match category filter\", function () {",
+              "    const response = pm.response.json();",
+              "    if (response.events && response.events.length > 0) {",
+              "        response.events.forEach(event => {",
+              "            pm.expect(event.categoryId).to.equal(1);",
+              "        });",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?categoryId=1&pageNumber=1&pageSize=20&sortBy=date",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "categoryId",
+              "value": "1"
+            },
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "date"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Eligible Events - Unauthorized",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 401\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/eligible?pageNumber=1&pageSize=20&sortBy=date",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "eligible"],
+          "query": [
+            {
+              "key": "pageNumber",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "date"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

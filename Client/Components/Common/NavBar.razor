@@ -1,0 +1,277 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using Client.Helpers
+@using Client.Services
+@using Client.Services.ApiClients
+@using System.Security.Claims
+@using Shared.Contracts.Users
+@implements IDisposable
+
+@if (_isAuthenticated)
+{
+    <MudAppBar Elevation="0" Class="mud-appbar">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Primary" Edge="Edge.Start" OnClick="@ToggleDrawer" />
+        <img src="assets/logo8tr2.png" alt="Meeps" class="navbar-logo navbar-logo-full clickable-logo"
+             @onclick="@(() => Navigation.NavigateTo("/"))" />
+        <img src="assets/logolite8tr.png" alt="Meeps" class="navbar-logo navbar-logo-compact clickable-logo"
+             @onclick="@(() => Navigation.NavigateTo("/"))" />
+
+        <MudSpacer />
+
+        @* Location Selector *@
+        <MudMenu @ref="_locationMenu" Icon="@Icons.Material.Filled.LocationOn" Color="Color.Primary"
+                 AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true"
+                 OpenChanged="@OnLocationMenuOpenChanged" PositionAtCursor="false">
+            <ActivatorContent>
+                <MudButton StartIcon="@Icons.Material.Filled.LocationOn" Color="Color.Secondary" Variant="Variant.Text"
+                           Size="Size.Small">
+                    @(GetCityDisplayName(_currentCity) ?? I18n.GetCommon("selectLocation"))
+                </MudButton>
+            </ActivatorContent>
+            <ChildContent>
+                <LocationSelectorDropdown @ref="_locationSelector" OnLocationChanged="@HandleLocationChanged"
+                                          OnDropdownClosed="@HandleDropdownClosed" />
+            </ChildContent>
+        </MudMenu>
+
+        <MudIconButton Icon="@(IsDarkMode? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       Color="Color.Primary" OnClick="@HandleDarkModeToggle"
+                       title="@(IsDarkMode? I18n.GetCommon("lightMode") : I18n.GetCommon("darkMode"))" />
+
+        <MudMenu Icon="@Icons.Material.Filled.Language" Color="Color.Primary" AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight">
+            <MudMenuItem OnClick="@(() => HandleLanguageChange("en-US"))">
+                <div class="d-flex align-center gap-2">
+                    <span>🇬🇧</span>
+                    <MudText>English</MudText>
+                    @if (I18n.CurrentCulture == "en-US")
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary" />
+                    }
+                </div>
+            </MudMenuItem>
+            <MudMenuItem OnClick="@(() => HandleLanguageChange("sv-SE"))">
+                <div class="d-flex align-center gap-2">
+                    <span>🇸🇪</span>
+                    <MudText>Svenska</MudText>
+                    @if (I18n.CurrentCulture == "sv-SE")
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary" />
+                    }
+                </div>
+            </MudMenuItem>
+        </MudMenu>
+
+        <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Primary" AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight">
+            <div class="navbar-user-header">
+                @if (!string.IsNullOrEmpty(_profileImageUrl))
+                {
+                    <div class="navbar-profile-avatar">
+                        <MudImage Src="@_profileImageUrl" Alt="@_displayName" Class="navbar-profile-image" />
+                    </div>
+                }
+                else
+                {
+                    <div class="navbar-profile-avatar">
+                        <MudAvatar Color="Color.Primary" Size="Size.Medium">
+                            @UserHelper.GetInitials(_displayName)
+                        </MudAvatar>
+                    </div>
+                }
+                <MudText Typo="Typo.body2">@_displayName</MudText>
+            </div>
+            <MudDivider />
+            <MudMenuItem Icon="@Icons.Material.Filled.Person" OnClick="@(() => Navigation.NavigateTo("/profile"))">
+                @I18n.GetCommon("profile")
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="@(() => Navigation.NavigateTo("/settings"))">
+                @I18n.GetCommon("settings")
+            </MudMenuItem>
+            <MudDivider />
+            <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="@HandleLogout">
+                @I18n.GetCommon("logout")
+            </MudMenuItem>
+        </MudMenu>
+    </MudAppBar>
+}
+
+@code {
+    [Inject] private II18nService I18n { get; set; } = default!;
+    [Inject] private IAuthApiClient AuthClient { get; set; } = default!;
+    [Inject] private IUsersApiClient UsersClient { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+    [Inject] private ILogger<NavBar> Logger { get; set; } = default!;
+    [Inject] private IEventFilterService EventFilterService { get; set; } = default!;
+    [Inject] private IEventFilterStateService EventFilterStateService { get; set; } = default!;
+
+    [Parameter] public EventCallback OnDrawerToggle { get; set; }
+    [Parameter] public bool IsDarkMode { get; set; }
+    [Parameter] public EventCallback OnDarkModeToggle { get; set; }
+
+    private bool _isAuthenticated = false;
+    private string _displayName = string.Empty;
+    private string? _profileImageUrl;
+    private string? _currentCity;
+    private MudMenu? _locationMenu;
+    private LocationSelectorDropdown? _locationSelector;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        _isAuthenticated = user.Identity?.IsAuthenticated ?? false;
+
+        if (_isAuthenticated)
+        {
+            _displayName = user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.FindFirst(ClaimTypes.Email)?.Value
+            ?? I18n.GetCommon("user");
+
+            await LoadCurrentLocation();
+        }
+        else
+        {
+            _displayName = I18n.GetCommon("user");
+        }
+
+        I18n.OnLanguageChanged += HandleLanguageChanged;
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        await LoadCurrentLocation();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadCurrentLocation()
+    {
+        try
+        {
+            // Load preferences (location)
+            var preferencesResult = await UsersClient.GetUserPreferencesAsync();
+            if (preferencesResult.IsSuccess && preferencesResult.Value != null)
+            {
+                _currentCity = preferencesResult.Value.DefaultCity;
+                Logger.LogInformation("Loaded current location: {City}", _currentCity ?? "None");
+            }
+
+            // Load profile (for profile image)
+            var profileResult = await UsersClient.GetUserProfileAsync();
+            if (profileResult.IsSuccess && profileResult.Value != null)
+            {
+                // Add cache-busting parameter to ensure browser reloads the image
+                var baseUrl = profileResult.Value.ProfileImageUrl;
+                _profileImageUrl = !string.IsNullOrEmpty(baseUrl)
+                    ? $"{baseUrl}?v={DateTime.Now.Ticks}"
+                    : baseUrl;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading current location in NavBar");
+        }
+    }
+
+    private async Task HandleLocationChanged(bool locationChanged)
+    {
+        await LoadCurrentLocation();
+
+        StateHasChanged();
+        Logger.LogInformation("Location changed in NavBar, reloaded: {City}", _currentCity ?? "None");
+
+        if (locationChanged)
+        {
+            // Full reload needed when location changes
+            EventFilterService.NotifyFilterChanged();
+        }
+        else
+        {
+            // Only radius changed, notify radius change to preserve filter state
+            var preferencesResult = await UsersClient.GetUserPreferencesAsync();
+            if (preferencesResult.IsSuccess && preferencesResult.Value != null)
+            {
+                EventFilterService.NotifyRadiusChanged(preferencesResult.Value.SearchRadius);
+            }
+        }
+    }
+
+    private async Task OnLocationMenuOpenChanged(bool isOpen)
+    {
+        // When menu closes, save any pending radius changes
+        if (!isOpen && _locationSelector != null)
+        {
+            await _locationSelector.OnMenuClosing();
+        }
+    }
+
+    private void HandleDropdownClosed()
+    {
+        // Close the location menu when event navigation happens
+        _locationMenu?.CloseMenuAsync();
+    }
+
+    private void HandleLanguageChanged()
+    {
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= HandleLanguageChanged;
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+
+    private async Task ToggleDrawer()
+    {
+        await OnDrawerToggle.InvokeAsync();
+    }
+
+    private async Task HandleDarkModeToggle()
+    {
+        await OnDarkModeToggle.InvokeAsync();
+    }
+
+    private async Task HandleLanguageChange(string culture)
+    {
+        await I18n.SetCultureAsync(culture);
+    }
+
+    private string GetDisplayName(ClaimsPrincipal user)
+    {
+        return user.FindFirst(ClaimTypes.Name)?.Value
+        ?? user.FindFirst(ClaimTypes.Email)?.Value
+        ?? I18n.GetCommon("user");
+    }
+
+    private string? GetCityDisplayName(string? fullLocation)
+    {
+        if (string.IsNullOrWhiteSpace(fullLocation))
+            return null;
+
+        // Extract just the city name (first part before comma)
+        var parts = fullLocation.Split(',');
+        return parts[0].Trim();
+    }
+
+    private async Task HandleLogout()
+    {
+        var result = await AuthClient.LogoutAsync();
+
+        if (result.IsSuccess)
+        {
+            // Clear all state and localStorage to prevent data leakage between users
+            await EventFilterStateService.ClearStateAsync();
+
+            // Notify the authentication state provider
+            if (AuthStateProvider is CustomAuthenticationStateProvider customProvider)
+            {
+                customProvider.NotifyAuthenticationStateChanged();
+            }
+
+            Navigation.NavigateTo("/login");
+        }
+    }
+}

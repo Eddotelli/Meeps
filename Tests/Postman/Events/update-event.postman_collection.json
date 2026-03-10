@@ -1,0 +1,263 @@
+{
+  "info": {
+    "name": "Events - Update Event",
+    "description": "Tests for UpdateEvent endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Update Event - Valid Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has eventId\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventId');",
+              "    pm.expect(response.eventId).to.equal(pm.environment.get('testEventId'));",
+              "});",
+              "",
+              "pm.test(\"Response has success message\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('message');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const timestamp = new Date().getTime();",
+              "pm.variables.set('updatedTitle', `Updated Event ${timestamp}`);",
+              "",
+              "const nextWeek = new Date();",
+              "nextWeek.setDate(nextWeek.getDate() + 14);",
+              "nextWeek.setHours(20, 0, 0, 0);",
+              "pm.variables.set('updatedDateTime', nextWeek.toISOString());"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": {{testEventId}},\n  \"title\": \"{{updatedTitle}}\",\n  \"description\": \"This is an updated description for the test event with more details.\",\n  \"location\": \"Gothenburg, Sweden\",\n  \"latitude\": 57.7089,\n  \"longitude\": 11.9746,\n  \"dateTime\": \"{{updatedDateTime}}\",\n  \"categoryId\": 1,\n  \"minAttendance\": 3,\n  \"maxAttendance\": 15,\n  \"minAge\": 21,\n  \"maxAge\": 65,\n  \"genderRestriction\": 0,\n  \"imageUrl\": \"https://example.com/updated-image.jpg\",\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Update Event - Invalid Title (Too Short)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": {{testEventId}},\n  \"title\": \"AB\",\n  \"description\": \"This is a valid description.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"latitude\": 59.3293,\n  \"longitude\": 18.0686,\n  \"dateTime\": \"2026-02-15T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"genderRestriction\": 0,\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Update Event - Past DateTime",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": {{testEventId}},\n  \"title\": \"Valid Title\",\n  \"description\": \"This is a valid description.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"latitude\": 59.3293,\n  \"longitude\": 18.0686,\n  \"dateTime\": \"2020-01-01T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"genderRestriction\": 0,\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Update Event - Unauthorized",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 401 Unauthorized\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": 1,\n  \"title\": \"Valid Title\",\n  \"description\": \"This is a valid description.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"latitude\": 59.3293,\n  \"longitude\": 18.0686,\n  \"dateTime\": \"2026-02-15T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"genderRestriction\": 0,\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. Update Event - Non-Existent Event",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": 99999,\n  \"title\": \"Valid Title\",\n  \"description\": \"This is a valid description.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"latitude\": 59.3293,\n  \"longitude\": 18.0686,\n  \"dateTime\": \"2026-02-15T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"genderRestriction\": 0,\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "6. Update Event - Invalid Attendance Range",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": {{testEventId}},\n  \"title\": \"Valid Title\",\n  \"description\": \"This is a valid description.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"latitude\": 59.3293,\n  \"longitude\": 18.0686,\n  \"dateTime\": \"2026-02-15T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 20,\n  \"maxAttendance\": 10,\n  \"genderRestriction\": 0,\n  \"isPublic\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

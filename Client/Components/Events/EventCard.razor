@@ -1,0 +1,237 @@
+@using Shared.Contracts.Events
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Services
+@inject NavigationManager Navigation
+@inject II18nService I18n
+
+<MudCard Class="event-card" Elevation="1" @onclick="NavigateToEvent">
+    <div class="event-card-content-wrapper">
+        @* Status badges container with left and right groups *@
+        <div class="event-card-status-badge d-flex justify-space-between flex-wrap align-center">
+            @* Left group: Event status and participation *@
+            <div class="d-flex flex-wrap align-center">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor()" Variant="Variant.Filled">
+                    @GetStatusText()
+                </MudChip>
+                @if (Event.IsUserCreator)
+                {
+                    <MudChip T="string" Icon="@Icons.Material.Filled.Star" Color="Color.Secondary" Variant="Variant.Filled"
+                             Size="Size.Small">
+                        @I18n.GetCommon("yourEvent")
+                    </MudChip>
+                }
+                else if (Event.IsUserParticipant)
+                {
+                    <MudChip T="string" Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success"
+                             Variant="Variant.Filled" Size="Size.Small">
+                        @I18n.GetCommon("participating")
+                    </MudChip>
+                }
+            </div>
+
+            @* Right group: Availability status and verified badge *@
+            <div class="d-flex align-center flex-wrap">
+                @if (Event.OnlyVerifiedUsers)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
+                             Icon="@Icons.Material.Filled.Verified">
+                        @I18n.GetCommon("verifiedOnly")
+                    </MudChip>
+                }
+                @if (Event.CurrentAttendance >= Event.MaxAttendance)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                             Icon="@Icons.Material.Filled.Block">
+                        @I18n.GetCommon("full")
+                    </MudChip>
+                }
+                else if (GetSpotsLeft() is > 0 and <= 3)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                             Icon="@Icons.Material.Filled.Warning">
+                        @GetSpotsLeftText()
+                    </MudChip>
+                }
+            </div>
+        </div>
+
+        <MudPaper Class="event-card-date-badge" Elevation="4">
+            <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.h5" Class="event-date-day">@LocalEventDateTime.ToString("dd")</MudText>
+                <MudText Typo="Typo.caption" Class="event-date-month">@LocalEventDateTime.ToString("MMM")</MudText>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="event-card-time-badge" Elevation="4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Class="time-icon" />
+                <MudText Typo="Typo.body2" Class="time-text">@LocalEventDateTime.ToString("HH:mm")</MudText>
+            </MudStack>
+        </MudPaper>
+
+        @if (!string.IsNullOrEmpty(Event.ImageUrl))
+        {
+            <MudCardMedia Image="@Event.ImageUrl" Height="200" />
+        }
+        else
+        {
+            <div class="event-card-placeholder">
+                <MudIcon Icon="@Icons.Material.Filled.Event" Size="Size.Large" Color="Color.Primary" />
+            </div>
+        }
+    </div>
+
+    <MudCardContent Class="event-card-content">
+        <div class="event-card-title-wrapper">
+            <MudText Typo="Typo.h5" Class="event-card-title">@Event.Title</MudText>
+            <div class="title-accent"></div>
+        </div>
+
+        <MudStack Spacing="2" Class="mb-3">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@Icons.Material.Filled.LocationOn" Size="Size.Small" />
+                <MudText Typo="Typo.body2">@GetShortLocation()</MudText>
+            </MudStack>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@CategoryIconHelper.GetIconForCategory(Event.Category)" Size="Size.Small"
+                         Color="@CategoryIconHelper.GetColorForCategory(Event.Category)" />
+                <MudText Typo="Typo.body2">@GetLocalizedCategoryName()</MudText>
+            </MudStack>
+        </MudStack>
+
+        <MudPaper Class="event-participants-display mb-3" Elevation="0">
+            <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Baseline" Justify="Justify.Center">
+                    <MudText Typo="Typo.h3" Class="participants-current">@Event.CurrentAttendance</MudText>
+                    <MudText Typo="Typo.h5" Class="participants-separator">/</MudText>
+                    <MudText Typo="Typo.h4" Class="participants-max">@Event.MaxAttendance</MudText>
+                </MudStack>
+                <MudText Typo="Typo.button" Class="participants-label">@I18n.GetCommon("participants")</MudText>
+                <MudProgressLinear Value="@GetAttendancePercentage()" Color="@GetAttendanceColor()" Class="mt-2"
+                                   Size="Size.Small" />
+            </MudStack>
+        </MudPaper>
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired]
+    public GetEventDetailsResponse Event { get; set; } = null!;
+
+    // Convert UTC time from server to local time for display
+    private DateTime LocalEventDateTime => Event.DateTime.ToLocalTime();
+
+    private Color GetStatusColor()
+    {
+        if (LocalEventDateTime < DateTime.Now)
+            return Color.Dark;
+
+        var timeUntilEvent = LocalEventDateTime - DateTime.Now;
+
+        // Röd när mindre än 1 timme kvar
+        if (timeUntilEvent.TotalHours < 1)
+            return Color.Error;
+
+        // Gul när mindre än 24 timmar kvar
+        if (timeUntilEvent.TotalHours < 24)
+            return Color.Warning;
+
+        return Color.Success;
+    }
+
+    private string GetStatusText()
+    {
+        if (LocalEventDateTime < DateTime.Now)
+            return I18n.GetCommon("eventStatusPassed");
+
+        var timeUntilEvent = LocalEventDateTime - DateTime.Now;
+
+        // Mindre än 1 timme kvar - visa minuter
+        if (timeUntilEvent.TotalMinutes < 60)
+        {
+            var minutesLeft = (int)Math.Ceiling(timeUntilEvent.TotalMinutes);
+
+            if (minutesLeft == 1)
+                return string.Format(I18n.GetCommon("xMinutesLeft"), minutesLeft);
+
+            return string.Format(I18n.GetCommon("xMinutesLeftPlural"), minutesLeft);
+        }
+
+        // Mindre än 24 timmar kvar - visa timmar
+        if (timeUntilEvent.TotalHours < 24)
+        {
+            var hoursLeft = (int)Math.Ceiling(timeUntilEvent.TotalHours);
+
+            if (hoursLeft == 1)
+                return string.Format(I18n.GetCommon("xHoursLeft"), hoursLeft);
+
+            return string.Format(I18n.GetCommon("xHoursLeftPlural"), hoursLeft);
+        }
+
+        // Räkna antal dagar kvar
+        var daysLeft = (int)Math.Ceiling(timeUntilEvent.TotalDays);
+
+        if (daysLeft == 1)
+            return string.Format(I18n.GetCommon("xDaysLeft"), daysLeft);
+
+        return string.Format(I18n.GetCommon("xDaysLeftPlural"), daysLeft);
+    }
+
+    private void NavigateToEvent()
+    {
+        Navigation.NavigateTo($"/events/{Event.EventHash}");
+    }
+
+    private int GetSpotsLeft()
+    {
+        return Event.MaxAttendance - Event.CurrentAttendance;
+    }
+
+    private string GetSpotsLeftText()
+    {
+        var spotsLeft = GetSpotsLeft();
+        if (spotsLeft == 1)
+        {
+            return string.Format(I18n.GetCommon("onlyXSpotsLeft"), spotsLeft);
+        }
+        return string.Format(I18n.GetCommon("onlyXSpotsLeftPlural"), spotsLeft);
+    }
+
+    private string GetShortLocation()
+    {
+        if (string.IsNullOrEmpty(Event.Location))
+            return string.Empty;
+
+        // Splitta på komma och ta första delen (gatuadress eller platsnamn)
+        var parts = Event.Location.Split(',');
+        return parts[0].Trim();
+    }
+
+    private double GetAttendancePercentage()
+    {
+        if (Event.MaxAttendance == 0)
+            return 0;
+
+        return ((double)Event.CurrentAttendance / Event.MaxAttendance) * 100;
+    }
+
+    private Color GetAttendanceColor()
+    {
+        var percentage = GetAttendancePercentage();
+
+        if (percentage >= 90)
+            return Color.Error;
+
+        if (percentage >= 70)
+            return Color.Warning;
+
+        return Color.Success;
+    }
+
+    private string GetLocalizedCategoryName()
+    {
+        return I18n.GetCommon(Event.Category.GetLocalizationKey());
+    }
+}

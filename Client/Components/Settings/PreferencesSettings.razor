@@ -1,0 +1,238 @@
+@using Shared.Contracts.Users
+@using Shared.Contracts.Locations
+@using Client.Services.ApiClients
+@using Client.Services
+
+@implements IDisposable
+@inject II18nService I18n
+@inject IUsersApiClient UsersApi
+@inject IDistanceUnitService DistanceUnit
+
+<MudCard Elevation="0" Class="modern-section-card">
+    <MudCardContent>
+        <div class="modern-section-header">
+            <div class="section-title-wrapper">
+                <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("eventPreferences")</MudText>
+                <div class="title-accent"></div>
+            </div>
+        </div>
+        <MudText Typo="Typo.body2" Class="mb-4" Color="Color.Secondary">
+            @I18n.GetHelpText("eventPreferencesDescription")
+        </MudText>
+        @if (_isLoading)
+        {
+            <Spinner />
+        }
+        else if (_preferences != null)
+        {
+            @if (!string.IsNullOrEmpty(_successKey))
+            {
+                <MudAlert Severity="Severity.Success" Class="mb-4" Variant="Variant.Text"
+                    Icon="@Icons.Material.Filled.CheckCircle">
+                    @I18n.GetMessage(_successKey)
+                </MudAlert>
+            }
+            @if (!string.IsNullOrEmpty(_errorCode))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4" Variant="Variant.Text">
+                    @I18n.GetError(_errorCode)
+                </MudAlert>
+            }
+
+            <EditForm Model="_editModel" OnValidSubmit="SavePreferences">
+                <LocalizedDataAnnotationsValidator />
+
+                <MudGrid Class="mb-4">
+                    <MudItem xs="12" md="8">
+                        <AddressSearch InitialCity="@_editModel!.DefaultCity"
+                            InitialLatitude="@_editModel.DefaultCityLatitude"
+                            InitialLongitude="@_editModel.DefaultCityLongitude" OnLocationSelected="HandleCitySelected"
+                            ShowMap="false" RadiusKm="@_editModel.SearchRadius" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <SliderField Value="@((int)DistanceUnit.GetDisplayRadius(_editModel!.SearchRadius))"
+                            ValueChanged="HandleRadiusChanged" Label="@searchRadiusLabel"
+                            HelperText="@searchRadiusHelperText" Min="@DistanceUnit.MinRadius" Max="@DistanceUnit.MaxRadius"
+                            Step="1" Suffix="@DistanceUnit.DistanceUnit" />
+                    </MudItem>
+                </MudGrid>
+
+                @if (_editModel!.DefaultCityLatitude.HasValue && _editModel.DefaultCityLongitude.HasValue)
+                {
+                    <MapView Latitude="@_editModel.DefaultCityLatitude.Value" Longitude="@_editModel.DefaultCityLongitude.Value"
+                        ZoomLevel="13" Height="map-md" ShowMarker="true" RadiusKm="@_editModel.SearchRadius" Class="mb-4" />
+                }
+
+                <MudStack Row="true" Spacing="2">
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                        Class="rounded-pill" Size="Size.Large" Disabled="_isSaving || !_hasChanges">
+                        <Spinner IsLoading="@_isSaving" LoadingText="@I18n.GetCommon("saving")"
+                            DefaultText="@I18n.GetCommon("savePreferences")" />
+                    </MudButton>
+
+                    @if (_hasChanges && !_isSaving)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Class="rounded-pill" Size="Size.Large"
+                            OnClick="CancelChanges">
+                            @I18n.GetCommon("cancel")
+                        </MudButton>
+                    }
+                </MudStack>
+            </EditForm>
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    private GetUserPreferencesResponse? _preferences;
+    private UpdatePreferencesRequest? _editModel;
+    private bool _isLoading = true;
+    private bool _isSaving;
+    private string? _errorCode;
+    private string? _successKey;
+    private bool _hasChanges = false;
+
+    private string searchRadiusLabel = string.Empty;
+    private string searchRadiusHelperText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += UpdateLabels;
+        DistanceUnit.OnUnitChanged += StateHasChanged;
+        UpdateLabels();
+    }
+
+    private void UpdateLabels()
+    {
+        searchRadiusLabel = I18n.GetCommon("searchRadius");
+        searchRadiusHelperText = I18n.GetHelpText("searchRadiusDescription");
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPreferences();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= UpdateLabels;
+        DistanceUnit.OnUnitChanged -= StateHasChanged;
+    }
+
+    private async Task LoadPreferences()
+    {
+        _isLoading = true;
+
+        var result = await UsersApi.GetUserPreferencesAsync();
+
+        if (result.IsSuccess)
+        {
+            _preferences = result.Value;
+            _editModel = new UpdatePreferencesRequest
+            {
+                DefaultCity = _preferences!.DefaultCity,
+                DefaultCityLatitude = _preferences.DefaultCityLatitude,
+                DefaultCityLongitude = _preferences.DefaultCityLongitude,
+                SearchRadius = _preferences.SearchRadius,
+                CategoryIds = _preferences.CategoryIds
+            };
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+        }
+
+        _isLoading = false;
+    }
+
+    private async Task SavePreferences()
+    {
+        if (_editModel == null) return;
+
+        _isSaving = true;
+        _errorCode = null;
+        _successKey = null;
+
+        var result = await UsersApi.UpdatePreferencesAsync(_editModel);
+
+        if (result.IsSuccess)
+        {
+            _preferences = result.Value;
+            _successKey = "preferencesUpdated";
+            _hasChanges = false;
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+        }
+
+        _isSaving = false;
+    }
+
+    private void HandleCitySelected(LocationSearchResult? location)
+    {
+        if (location != null && _editModel != null)
+        {
+            _editModel.DefaultCity = location.DisplayName;
+            _editModel.DefaultCityLatitude = location.Latitude;
+            _editModel.DefaultCityLongitude = location.Longitude;
+            CheckForChanges();
+        }
+    }
+
+    private void HandleRadiusChanged(int newRadius)
+    {
+        if (_editModel != null)
+        {
+            _editModel.SearchRadius = DistanceUnit.ConvertToKilometers(newRadius);
+            CheckForChanges();
+        }
+    }
+
+    private void CheckForChanges()
+    {
+        if (_preferences == null || _editModel == null)
+        {
+            _hasChanges = false;
+            return;
+        }
+
+        bool locationChanged = !IsSameLocation();
+        bool radiusChanged = _preferences.SearchRadius != _editModel.SearchRadius;
+        _hasChanges = locationChanged || radiusChanged;
+    }
+
+    private bool IsSameLocation()
+    {
+        if (_preferences == null || _editModel == null) return true;
+
+        if (!_preferences.DefaultCityLatitude.HasValue ||
+        !_preferences.DefaultCityLongitude.HasValue ||
+        !_editModel.DefaultCityLatitude.HasValue ||
+        !_editModel.DefaultCityLongitude.HasValue)
+        {
+            return _preferences.DefaultCity == _editModel.DefaultCity;
+        }
+
+        return Math.Abs(_preferences.DefaultCityLatitude.Value - _editModel.DefaultCityLatitude.Value) < 0.0001 &&
+        Math.Abs(_preferences.DefaultCityLongitude.Value - _editModel.DefaultCityLongitude.Value) < 0.0001;
+    }
+
+    private void CancelChanges()
+    {
+        if (_preferences == null) return;
+
+        _editModel = new UpdatePreferencesRequest
+        {
+            DefaultCity = _preferences.DefaultCity,
+            DefaultCityLatitude = _preferences.DefaultCityLatitude,
+            DefaultCityLongitude = _preferences.DefaultCityLongitude,
+            SearchRadius = _preferences.SearchRadius,
+            CategoryIds = _preferences.CategoryIds
+        };
+
+        _hasChanges = false;
+        _errorCode = null;
+    }
+}

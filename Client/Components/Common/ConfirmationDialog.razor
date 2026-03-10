@@ -1,0 +1,152 @@
+@using Client.Services
+@inject II18nService I18n
+
+@*
+USAGE EXAMPLE:
+
+<ConfirmationDialog 
+    IsVisible="@showDialog"
+    IsVisibleChanged="@((value) => showDialog = value)"
+    IsProcessing="@isProcessing"
+    Title="@I18n.GetCommon("confirmAction")"
+    Message="@I18n.GetMessage("confirmDeleteEvent")"
+    WarningMessage="@I18n.GetMessage("actionCannotBeUndone")"
+    ConfirmButtonText="@I18n.GetCommon("delete")"
+    ConfirmButtonColor="Color.Error"
+    OnConfirm="HandleDelete" />
+
+PARAMETERS:
+- IsVisible: Controls dialog visibility (two-way binding)
+- IsVisibleChanged: Event callback for visibility changes
+- IsProcessing: Shows loading spinner and disables buttons
+- Title: Dialog title (localized)
+- Message: Main confirmation message (localized)
+- WarningMessage: Optional warning text (localized, nullable)
+- ConfirmButtonText: Text for confirm button (localized)
+- ConfirmButtonColor: Color of confirm button (default: Primary)
+- OnConfirm: Callback executed when user confirms
+- OnCancel: Optional callback executed when user cancels (default: just closes dialog)
+
+EXAMPLES:
+
+1. Delete Event:
+<ConfirmationDialog 
+    IsVisible="@showDeleteDialog"
+    IsVisibleChanged="@((v) => showDeleteDialog = v)"
+    IsProcessing="@isDeleting"
+    Title="@I18n.GetCommon("confirmAction")"
+    Message="@I18n.GetMessage("confirmDeleteEvent")"
+    WarningMessage="@I18n.GetMessage("actionCannotBeUndone")"
+    ConfirmButtonText="@I18n.GetCommon("delete")"
+    ConfirmButtonColor="Color.Error"
+    OnConfirm="HandleDeleteEvent" />
+
+2. Leave Event:
+<ConfirmationDialog 
+    IsVisible="@showLeaveDialog"
+    IsVisibleChanged="@((v) => showLeaveDialog = v)"
+    IsProcessing="@isLeaving"
+    Title="@I18n.GetCommon("confirmAction")"
+    Message="@I18n.GetMessage("confirmLeaveEvent")"
+    ConfirmButtonText="@I18n.GetCommon("leave")"
+    ConfirmButtonColor="Color.Warning"
+    OnConfirm="HandleLeaveEvent" />
+
+3. Submit Form:
+<ConfirmationDialog 
+    IsVisible="@showSubmitDialog"
+    IsVisibleChanged="@((v) => showSubmitDialog = v)"
+    IsProcessing="@isSubmitting"
+    Title="@I18n.GetCommon("confirmAction")"
+    Message="@I18n.GetMessage("confirmSubmitForm")"
+    ConfirmButtonText="@I18n.GetCommon("submit")"
+    ConfirmButtonColor="Color.Success"
+    OnConfirm="HandleSubmitForm" />
+*@
+
+@if (IsVisible)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999" OnClick="@HandleOverlayClick">
+        <MudPaper Class="pa-6" Style="max-width: 500px; min-width: 400px;" @onclick:stopPropagation="true">
+            <MudText Typo="Typo.h6" Class="mb-4">
+                @Title
+            </MudText>
+            <MudText Class="mb-2">@Message</MudText>
+            @if (!string.IsNullOrEmpty(WarningMessage))
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error" Class="mb-4">
+                    @WarningMessage
+                </MudText>
+            }
+            @if (CustomContent != null)
+            {
+                @CustomContent
+            }
+            <div class="d-flex justify-end gap-2">
+                <MudButton OnClick="HandleCancel" Disabled="IsProcessing">
+                    @I18n.GetCommon("cancel")
+                </MudButton>
+                <MudButton Color="@ConfirmButtonColor" Variant="Variant.Filled" OnClick="HandleConfirm"
+                           Disabled="IsProcessing">
+                    @if (IsProcessing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    }
+                    @ConfirmButtonText
+                </MudButton>
+            </div>
+        </MudPaper>
+    </MudOverlay>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
+
+    [Parameter] public bool IsProcessing { get; set; }
+
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Message { get; set; } = string.Empty;
+    [Parameter] public string? WarningMessage { get; set; }
+
+    [Parameter] public string ConfirmButtonText { get; set; } = string.Empty;
+    [Parameter] public Color ConfirmButtonColor { get; set; } = Color.Primary;
+
+    [Parameter] public RenderFragment? CustomContent { get; set; }
+
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback? OnCancel { get; set; }
+
+    private async Task HandleOverlayClick()
+    {
+        if (!IsProcessing)
+        {
+            await CloseDialog();
+        }
+    }
+
+    private async Task HandleCancel()
+    {
+        if (OnCancel.HasValue)
+        {
+            await OnCancel.Value.InvokeAsync();
+        }
+        await CloseDialog();
+    }
+
+    private async Task HandleConfirm()
+    {
+        if (OnConfirm.HasDelegate)
+        {
+            await OnConfirm.InvokeAsync();
+        }
+    }
+
+    private async Task CloseDialog()
+    {
+        if (IsVisibleChanged.HasDelegate)
+        {
+            await IsVisibleChanged.InvokeAsync(false);
+        }
+    }
+}

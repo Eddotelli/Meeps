@@ -1,0 +1,730 @@
+@page "/events/{hash}"
+@using Shared.Contracts.Events
+@using Shared.Enums
+@using Shared.Common.Constants
+@using Shared.Extensions
+@using Client.Components.Events
+@using Client.Components.Common
+@using Client.Services.ApiClients
+@using Client.Services
+@using Microsoft.AspNetCore.Authorization
+@using static Client.Components.Events.EditEventForm
+@attribute [Authorize]
+@implements IDisposable
+@inject IEventsApiClient EventsApiClient
+@inject NavigationManager Navigation
+@inject II18nService I18n
+@inject ILogger<EventDetails> Logger
+@inject ISnackbar Snackbar
+
+<PageTitle>@(eventDetails?.Title ?? I18n.GetCommon("loading"))</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraExtraLarge" Class="mt-4 mb-4">
+    @if (isLoading)
+    {
+        <Spinner />
+    }
+    else if (!string.IsNullOrEmpty(errorCode))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">
+            @I18n.GetError(errorCode)
+        </MudAlert>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Navigation.NavigateTo("/"))">
+            @I18n.GetCommon("back")
+        </MudButton>
+    }
+    else if (eventDetails != null)
+    {
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Navigation.NavigateTo("/"))" Class="mb-3">
+            @I18n.GetCommon("back")
+        </MudButton>
+
+        @* Chat Toggle Button - Floating *@
+        @if (!isChatOpen && (eventDetails?.IsUserParticipant ?? false))
+        {
+            <MudFab Color="Color.Primary" StartIcon="@Icons.Material.Filled.Chat" OnClick="@ToggleChat"
+                    Class="event-details-chat-fab" Size="Size.Large" aria-label="@I18n.GetCommon("openChat")" />
+        }
+
+        <MudGrid Spacing="3">
+            @* Event Details Column *@
+            <MudItem xs="12">
+                @if (isEditMode && eventDetails!.IsUserCreator)
+                {
+                    <div class="page-title-wrapper">
+                        <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon("editEvent")</MudText>
+                    </div>
+
+                    <EditEventForm UpdateEventRequest="@updateEventRequest" Categories="@categories" IsLoading="@isSaving"
+                                   OnSubmit="@HandleUpdateEvent" OnCancel="@CancelEdit" />
+                }
+                else
+                {
+                    <MudCard Elevation="2" Class="event-details-card">
+                        <div class="event-card-content-wrapper">
+                            @* Status badges container with left and right groups *@
+                            <div class="event-card-status-badge d-flex justify-space-between flex-wrap align-center">
+                                @* Left group: Event status and participation *@
+                                <div class="d-flex flex-wrap align-center">
+                                    <MudChip T="string" Size="Size.Large" Color="@GetStatusColor()" Variant="Variant.Filled">
+                                        @GetStatusText()
+                                    </MudChip>
+                                    @if (eventDetails!.IsUserParticipant && !eventDetails.IsUserCreator)
+                                    {
+                                        <MudChip T="string" Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success"
+                                                 Variant="Variant.Filled" Size="Size.Large">
+                                            @I18n.GetCommon("participating")
+                                        </MudChip>
+                                    }
+                                    @if (eventDetails.IsUserCreator)
+                                    {
+                                        <MudChip T="string" Icon="@Icons.Material.Filled.Star" Color="Color.Secondary"
+                                                 Variant="Variant.Filled" Size="Size.Large">
+                                            @I18n.GetCommon("yourEvent")
+                                        </MudChip>
+                                    }
+                                </div>
+
+                                @* Right group: Availability status *@
+                                <div class="d-flex gap-2 align-center flex-wrap">
+                                    @if (eventDetails!.OnlyVerifiedUsers)
+                                    {
+                                        <MudChip T="string" Size="Size.Large" Color="Color.Info" Variant="Variant.Filled"
+                                                 Icon="@Icons.Material.Filled.Verified">
+                                            @I18n.GetCommon("verifiedOnly")
+                                        </MudChip>
+                                    }
+                                    @if (eventDetails!.CurrentAttendance >= eventDetails.MaxAttendance)
+                                    {
+                                        <MudChip T="string" Size="Size.Large" Color="Color.Error" Variant="Variant.Filled"
+                                                 Icon="@Icons.Material.Filled.Block">
+                                            @I18n.GetCommon("full")
+                                        </MudChip>
+                                    }
+                                    else if (GetSpotsLeft() is > 0 and <= 3)
+                                    {
+                                        <MudChip T="string" Size="Size.Large" Color="Color.Warning" Variant="Variant.Filled"
+                                                 Icon="@Icons.Material.Filled.Warning">
+                                            @GetSpotsLeftText()
+                                        </MudChip>
+                                    }
+                                </div>
+                            </div>
+
+                            @* Date badge - larger for details page *@
+                            <MudPaper Class="event-card-date-badge" Elevation="4">
+                                <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                                    <MudText Typo="Typo.h4" Class="event-date-day">@LocalEventDateTime.ToString("dd")</MudText>
+                                    <MudText Typo="Typo.body2" Class="event-date-month">@LocalEventDateTime.ToString("MMM")
+                                    </MudText>
+                                </MudStack>
+                            </MudPaper>
+
+                            @* Time badge *@
+                            <MudPaper Class="event-card-time-badge" Elevation="4">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.AccessTime" Size="Size.Large" Class="time-icon" />
+                                    <MudText Typo="Typo.body2" Class="time-text">@LocalEventDateTime.ToString("HH:mm")</MudText>
+                                </MudStack>
+                            </MudPaper>
+
+                            @if (!string.IsNullOrEmpty(eventDetails.ImageUrl))
+                            {
+                                <MudCardMedia Image="@eventDetails.ImageUrl" Height="400" />
+                            }
+                            else
+                            {
+                                <div class="event-card-placeholder event-image-placeholder">
+                                    <MudIcon Icon="@Icons.Material.Filled.Event" Size="Size.Large" Color="Color.Primary" />
+                                </div>
+                            }
+                        </div>
+
+                        <MudCardContent>
+                            <div class="d-flex justify-space-between align-center mb-3">
+                                <div class="event-card-title-wrapper">
+                                    <MudText Typo="Typo.h2" Class="event-details-title">@eventDetails.Title</MudText>
+                                    <div class="title-accent"></div>
+                                </div>
+                                @if (eventDetails.IsUserCreator && !isEditMode)
+                                {
+                                    @* Desktop - knapp med både ikon och text *@
+                                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.Edit" OnClick="@ToggleEditMode">
+                                            @I18n.GetCommon("edit")
+                                        </MudButton>
+                                    </MudHidden>
+
+                                    @* Mobil - endast ikon *@
+                                    <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary"
+                                                       Variant="Variant.Filled" OnClick="@ToggleEditMode"
+                                                       aria-label="@I18n.GetCommon("edit")" />
+                                    </MudHidden>
+                                }
+                            </div>
+
+                            @* Participants display - styled like event card *@
+                            <MudPaper Class="event-participants-display mb-4" Elevation="0">
+                                <MudStack Spacing="0" AlignItems="AlignItems.Center">
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Baseline" Justify="Justify.Center">
+                                        <MudText Typo="Typo.h2" Class="participants-current">@eventDetails.CurrentAttendance
+                                        </MudText>
+                                        <MudText Typo="Typo.h4" Class="participants-separator">/</MudText>
+                                        <MudText Typo="Typo.h3" Class="participants-max">@eventDetails.MaxAttendance</MudText>
+                                    </MudStack>
+                                    <MudText Typo="Typo.button" Class="participants-label">@I18n.GetCommon("participants")
+                                    </MudText>
+                                    <MudProgressLinear Value="@GetAttendancePercentage()" Color="@GetAttendanceColor()"
+                                                       Class="mt-2" Size="Size.Medium" />
+                                </MudStack>
+                            </MudPaper>
+
+                            @* Participants list (only visible to event creator) *@
+                            <ParticipantsList Participants="@eventDetails.Participants"
+                                              BlockedParticipants="@eventDetails.BlockedParticipants"
+                                              IsUserCreator="@eventDetails.IsUserCreator" EventId="@eventDetails.Id"
+                                              OnParticipantBlocked="@HandleParticipantBlocked" />
+
+                            <MudDivider Class="mb-4" />
+
+                            <MudText Typo="Typo.h6" Class="mb-2">@I18n.GetCommon("description")</MudText>
+                            <MudText Typo="Typo.body1" Class="mb-4">@eventDetails.Description</MudText>
+
+                            <MudDivider Class="mb-4" />
+
+                            <MudText Typo="Typo.h6" Class="mb-3">@I18n.GetCommon("eventDetails")</MudText>
+                            <MudStack Spacing="3" Class="mb-4">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                    <MudIcon Icon="@Icons.Material.Filled.LocationOn" Size="Size.Medium"
+                                             Color="Color.Primary" />
+                                    <div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("location")
+                                        </MudText>
+                                        <MudText Typo="Typo.body1">@eventDetails.Location</MudText>
+                                    </div>
+                                </MudStack>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                    <MudIcon Icon="@CategoryIconHelper.GetIconForCategory(eventDetails.Category)"
+                                             Size="Size.Medium"
+                                             Color="@CategoryIconHelper.GetColorForCategory(eventDetails.Category)" />
+                                    <div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("category")
+                                        </MudText>
+                                        <MudText Typo="Typo.body1">@GetLocalizedCategoryName()</MudText>
+                                    </div>
+                                </MudStack>
+
+                                @if (eventDetails.MinAge.HasValue || eventDetails.MaxAge.HasValue)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Medium" Color="Color.Primary" />
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("ageRestriction")
+                                            </MudText>
+                                            <MudText Typo="Typo.body1">@GetAgeRestrictionText()</MudText>
+                                        </div>
+                                    </MudStack>
+                                }
+
+                                @if (eventDetails.GenderRestriction != GenderRestriction.None)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Medium" Color="Color.Primary" />
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @I18n.GetCommon("genderRestriction")
+                                            </MudText>
+                                            <MudText Typo="Typo.body1">
+                                                @I18n.GetCommon(eventDetails.GenderRestriction.GetLocalizationKey())</MudText>
+                                            </div>
+                                        </MudStack>
+                                    }
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Medium" Color="Color.Primary" />
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("createdBy")
+                                            </MudText>
+                                            <MudText Typo="Typo.body1">@eventDetails.CreatedByUserName</MudText>
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.CalendarToday" Size="Size.Medium"
+                                                 Color="Color.Primary" />
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("createdAt")
+                                            </MudText>
+                                            <MudText Typo="Typo.body1">@eventDetails.CreatedAt.ToString("dd MMM yyyy")</MudText>
+                                        </div>
+                                    </MudStack>
+                                </MudStack>
+                            </MudCardContent>
+
+                            <MudCardActions Class="event-details-actions">
+                                @if (!eventDetails.IsUserCreator && !eventDetails.IsUserParticipant &&
+                                                                                                                                                                                                                                                eventDetails.CurrentAttendance <
+                                                                                                                                                                                                                                                eventDetails.MaxAttendance)
+                                {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Success"
+                                               StartIcon="@Icons.Material.Filled.PersonAdd" Size="Size.Large" OnClick="@HandleJoinEvent"
+                                               Disabled="@isJoining">
+                                        @if (isJoining)
+                                        {
+                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                                        }
+                                        @I18n.GetCommon("joinEvent")
+                                    </MudButton>
+                                }
+                                else if (eventDetails.IsUserParticipant && !eventDetails.IsUserCreator)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                                               StartIcon="@Icons.Material.Filled.PersonRemove" Size="Size.Large" OnClick="@HandleLeaveEvent"
+                                               Disabled="@isLeaving">
+                                        @if (isLeaving)
+                                        {
+                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                                        }
+                                        @I18n.GetCommon("leaveEvent")
+                                    </MudButton>
+                                }
+                                @if (eventDetails.IsUserCreator)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                               Size="Size.Large" OnClick="ShowDeleteConfirmation" Disabled="isDeleting">
+                                        @I18n.GetCommon("delete")
+                                    </MudButton>
+                                }
+                            </MudCardActions>
+                        </MudCard>
+                    }
+                </MudItem>
+
+            </MudGrid>
+
+            @* Delete Confirmation Dialog *@
+            <ConfirmationDialog IsVisible="@showDeleteDialog" IsVisibleChanged="@((value) => showDeleteDialog = value)"
+                                IsProcessing="@isDeleting" Title="@I18n.GetCommon("confirmAction")"
+                                Message="@I18n.GetMessage("confirmDeleteEvent")" WarningMessage="@I18n.GetMessage("actionCannotBeUndone")"
+                                ConfirmButtonText="@I18n.GetCommon("delete")" ConfirmButtonColor="Color.Error" OnConfirm="HandleDeleteEvent" />
+
+            @* Event Chat - Floating overlay from bottom-right *@
+            @if (isChatOpen && (eventDetails?.IsUserParticipant ?? false))
+            {
+                <div class="chat-floating-overlay">
+                    <EventChat EventHash="@Hash" EventId="@(eventDetails?.Id ?? 0)"
+                               IsParticipant="@(eventDetails?.IsUserParticipant ?? false)" OnClose="@ToggleChat" />
+                </div>
+            }
+        }
+    </MudContainer>
+
+@code {
+    [Parameter]
+    public string Hash { get; set; } = string.Empty;
+
+    private GetEventDetailsResponse? eventDetails;
+    private UpdateEventRequest updateEventRequest = new();
+    private List<EditEventForm.CategoryDto> categories = new();
+    private string? errorCode;
+    private bool isLoading = true;
+    private bool isEditMode = false;
+    private bool isSaving = false;
+    private bool isJoining = false;
+    private bool isLeaving = false;
+    private bool isChatOpen = false;
+    private bool isDeleting = false;
+    private bool showDeleteDialog = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLanguageChanged += OnLanguageChangedHandler;
+        LoadCategories();
+        await LoadEventDetails();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(Hash))
+        {
+            await LoadEventDetails();
+        }
+    }
+
+    private async Task LoadEventDetails()
+    {
+        isLoading = true;
+        errorCode = null;
+
+        try
+        {
+            var result = await EventsApiClient.GetEventDetailsAsync(Hash);
+
+            if (result.IsSuccess)
+            {
+                eventDetails = result.Value;
+                Logger.LogInformation("Loaded event {EventHash}", Hash);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? ErrorCodes.EventNotFound;
+                Logger.LogError("Failed to load event {EventHash}: {Error}", Hash, result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading event {EventHash}", Hash);
+            errorCode = ErrorCodes.ServerError;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void LoadCategories()
+    {
+        // Load categories from enum - single source of truth
+        categories = CategoryTypeExtensions.GetAll()
+        .Select(c => new EditEventForm.CategoryDto
+        {
+            Id = (int)c,
+            Name = I18n.GetCommon(c.GetLocalizationKey())
+        })
+        .ToList();
+    }
+
+    private void ToggleEditMode()
+    {
+        if (eventDetails == null) return;
+
+        isEditMode = true;
+
+        // Populate update request with current event data
+        updateEventRequest = new UpdateEventRequest
+        {
+            EventId = eventDetails.Id,
+            EventHash = eventDetails.EventHash,
+            Title = eventDetails.Title,
+            Description = eventDetails.Description,
+            Location = eventDetails.Location,
+            Latitude = eventDetails.Latitude,
+            Longitude = eventDetails.Longitude,
+            DateTime = eventDetails.DateTime,
+            CategoryId = eventDetails.CategoryId,
+            MinAttendance = eventDetails.MinAttendance,
+            MaxAttendance = eventDetails.MaxAttendance,
+            MinAge = eventDetails.MinAge,
+            MaxAge = eventDetails.MaxAge,
+            GenderRestriction = eventDetails.GenderRestriction,
+            ImageUrl = eventDetails.ImageUrl,
+            IsPublic = eventDetails.IsPublic,
+            OnlyVerifiedUsers = eventDetails.OnlyVerifiedUsers
+        };
+    }
+
+    private async Task HandleUpdateEvent(UpdateEventRequest request)
+    {
+        isSaving = true;
+
+        try
+        {
+            var result = await EventsApiClient.UpdateEventAsync(request);
+
+            if (result.IsSuccess)
+            {
+                Snackbar.Add(I18n.GetMessage(MessageKeys.EventUpdated), Severity.Success);
+                isEditMode = false;
+                await LoadEventDetails(); // Reload to show updated data
+            }
+            else
+            {
+                Snackbar.Add(I18n.GetError(result.Error?.Code ?? ErrorCodes.ServerError), Severity.Error);
+                Logger.LogError("Failed to update event: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating event");
+            Snackbar.Add(I18n.GetError(ErrorCodes.ServerError), Severity.Error);
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void CancelEdit()
+    {
+        isEditMode = false;
+        updateEventRequest = new();
+    }
+
+    // Convert UTC time from server to local time for display
+    private DateTime LocalEventDateTime => eventDetails?.DateTime.ToLocalTime() ?? DateTime.Now;
+
+    private Color GetStatusColor()
+    {
+        if (eventDetails == null) return Color.Default;
+
+        if (LocalEventDateTime < DateTime.Now)
+            return Color.Dark;
+
+        var timeUntilEvent = LocalEventDateTime - DateTime.Now;
+
+        // Röd när mindre än 1 timme kvar
+        if (timeUntilEvent.TotalHours < 1)
+            return Color.Error;
+
+        // Gul när mindre än 24 timmar kvar
+        if (timeUntilEvent.TotalHours < 24)
+            return Color.Warning;
+
+        return Color.Success;
+    }
+
+    private string GetStatusText()
+    {
+        if (eventDetails == null) return string.Empty;
+
+        if (LocalEventDateTime < DateTime.Now)
+            return I18n.GetCommon("eventStatusPassed");
+
+        var timeUntilEvent = LocalEventDateTime - DateTime.Now;
+
+        // Mindre än 1 timme kvar - visa minuter
+        if (timeUntilEvent.TotalMinutes < 60)
+        {
+            var minutesLeft = (int)Math.Ceiling(timeUntilEvent.TotalMinutes);
+
+            if (minutesLeft == 1)
+                return string.Format(I18n.GetCommon("xMinutesLeft"), minutesLeft);
+
+            return string.Format(I18n.GetCommon("xMinutesLeftPlural"), minutesLeft);
+        }
+
+        // Mindre än 24 timmar kvar - visa timmar
+        if (timeUntilEvent.TotalHours < 24)
+        {
+            var hoursLeft = (int)Math.Ceiling(timeUntilEvent.TotalHours);
+
+            if (hoursLeft == 1)
+                return string.Format(I18n.GetCommon("xHoursLeft"), hoursLeft);
+
+            return string.Format(I18n.GetCommon("xHoursLeftPlural"), hoursLeft);
+        }
+
+        // Räkna antal dagar kvar
+        var daysLeft = (int)Math.Ceiling(timeUntilEvent.TotalDays);
+
+        if (daysLeft == 1)
+            return string.Format(I18n.GetCommon("xDaysLeft"), daysLeft);
+
+        return string.Format(I18n.GetCommon("xDaysLeftPlural"), daysLeft);
+    }
+
+    private int GetSpotsLeft()
+    {
+        if (eventDetails == null) return 0;
+        return eventDetails.MaxAttendance - eventDetails.CurrentAttendance;
+    }
+
+    private string GetSpotsLeftText()
+    {
+        var spotsLeft = GetSpotsLeft();
+        if (spotsLeft == 1)
+        {
+            return string.Format(I18n.GetCommon("onlyXSpotsLeft"), spotsLeft);
+        }
+        return string.Format(I18n.GetCommon("onlyXSpotsLeftPlural"), spotsLeft);
+    }
+
+    private double GetAttendancePercentage()
+    {
+        if (eventDetails == null || eventDetails.MaxAttendance == 0)
+            return 0;
+
+        return ((double)eventDetails.CurrentAttendance / eventDetails.MaxAttendance) * 100;
+    }
+
+    private Color GetAttendanceColor()
+    {
+        var percentage = GetAttendancePercentage();
+
+        if (percentage >= 90)
+            return Color.Error;
+
+        if (percentage >= 70)
+            return Color.Warning;
+
+        return Color.Success;
+    }
+
+    private string GetAgeRestrictionText()
+    {
+        if (eventDetails == null) return string.Empty;
+
+        if (eventDetails.MinAge.HasValue && eventDetails.MaxAge.HasValue)
+            return $"{eventDetails.MinAge} - {eventDetails.MaxAge} {I18n.GetCommon("years")}";
+
+        if (eventDetails.MinAge.HasValue)
+            return $"{eventDetails.MinAge}+ {I18n.GetCommon("years")}";
+
+        if (eventDetails.MaxAge.HasValue)
+            return $"{I18n.GetCommon("upTo")} {eventDetails.MaxAge} {I18n.GetCommon("years")}";
+
+        return I18n.GetCommon("noRestriction");
+    }
+
+    private void OnLanguageChangedHandler()
+    {
+        StateHasChanged();
+    }
+
+    private async Task HandleJoinEvent()
+    {
+        if (eventDetails == null) return;
+
+        isJoining = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await EventsApiClient.JoinEventAsync(Hash);
+
+            if (result.IsSuccess)
+            {
+                Snackbar.Add(I18n.GetMessage(MessageKeys.EventJoinedSuccess), Severity.Success);
+                Logger.LogInformation("Successfully joined event {EventHash}", Hash);
+
+                // Reload event details to update IsUserParticipant flag
+                await LoadEventDetails();
+            }
+            else
+            {
+                var errorMessage = I18n.GetError(result.Error?.Code ?? ErrorCodes.ServerError);
+                Snackbar.Add(errorMessage, Severity.Error);
+                Logger.LogError("Failed to join event {EventHash}: {Error}", Hash, result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error joining event {EventHash}", Hash);
+            Snackbar.Add(I18n.GetError(ErrorCodes.ServerError), Severity.Error);
+        }
+        finally
+        {
+            isJoining = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleLeaveEvent()
+    {
+        if (eventDetails == null) return;
+
+        isLeaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await EventsApiClient.LeaveEventAsync(Hash);
+
+            if (result.IsSuccess)
+            {
+                Snackbar.Add(I18n.GetMessage(MessageKeys.EventLeftSuccess), Severity.Success);
+                Logger.LogInformation("Successfully left event {EventHash}", Hash);
+
+                // Reload event details to update IsUserParticipant flag
+                await LoadEventDetails();
+            }
+            else
+            {
+                var errorMessage = I18n.GetError(result.Error?.Code ?? ErrorCodes.ServerError);
+                Snackbar.Add(errorMessage, Severity.Error);
+                Logger.LogError("Failed to leave event {EventHash}: {Error}", Hash, result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error leaving event {EventHash}", Hash);
+            Snackbar.Add(I18n.GetError(ErrorCodes.ServerError), Severity.Error);
+        }
+        finally
+        {
+            isLeaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowDeleteConfirmation()
+    {
+        showDeleteDialog = true;
+    }
+
+    private async Task HandleDeleteEvent()
+    {
+        isDeleting = true;
+
+        try
+        {
+            Logger.LogInformation("Attempting to delete event {EventHash}", Hash);
+
+            var result = await EventsApiClient.DeleteEventAsync(Hash);
+
+            if (result.IsFailure)
+            {
+                Snackbar.Add(I18n.GetError(result.Error?.Code ?? ErrorCodes.ServerError), Severity.Error);
+                Logger.LogWarning("Failed to delete event: {ErrorCode}", result.Error?.Code);
+                showDeleteDialog = false;
+                return;
+            }
+
+            Logger.LogInformation("Event deleted successfully");
+            Snackbar.Add(I18n.GetMessage(MessageKeys.EventDeleted), Severity.Success);
+            showDeleteDialog = false;
+
+            Navigation.NavigateTo("/events/my-events");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting event");
+            Snackbar.Add(I18n.GetError(ErrorCodes.ServerError), Severity.Error);
+            showDeleteDialog = false;
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    private async Task HandleParticipantBlocked()
+    {
+        // Reload event details to refresh participant list
+        await LoadEventDetails();
+    }
+
+    private void ToggleChat()
+    {
+        isChatOpen = !isChatOpen;
+        StateHasChanged();
+    }
+
+    private string GetLocalizedCategoryName()
+    {
+        if (eventDetails == null)
+            return string.Empty;
+
+        return I18n.GetCommon(eventDetails.Category.GetLocalizationKey());
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= OnLanguageChangedHandler;
+    }
+}

@@ -1,0 +1,330 @@
+@page "/"
+@using Microsoft.AspNetCore.Components.Authorization
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Events
+@using Client.Components.Common
+@using Client.Common
+@using Shared.Contracts.Events
+@using Shared.Enums
+@using Shared.Common.Constants
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject II18nService I18n
+@inject IEventsApiClient EventsApiClient
+@inject IEventFilterService EventFilterService
+@inject IUsersApiClient UsersApiClient
+@inject IDistanceUnitService DistanceUnit
+@inject IEventFilterStateService FilterState
+
+<PageTitle>@I18n.GetCommon("home")</PageTitle>
+
+@if (_isAuthenticated)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-8">
+        <div class="page-title-wrapper mb-6">
+            <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon("eligibleEvents")</MudText>
+            <div class="title-accent"></div>
+        </div>
+
+        @if (_isLoading)
+        {
+            <Spinner />
+        }
+        else if (!string.IsNullOrEmpty(_errorCode))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                @I18n.GetError(_errorCode)
+            </MudAlert>
+        }
+        else
+        {
+            @* Event Filter Component *@
+            <EventFilter OnFilterChange="HandleFilterChange" TotalCount="@_allEvents.Count"
+                FilteredCount="@_filteredEvents.Count" />
+
+            @if (_filteredEvents.Any())
+            {
+                <MudGrid Spacing="3" Class="mb-8">
+                    @foreach (var eventItem in _displayedEvents)
+                    {
+                        <MudItem xs="12" sm="6" md="4" lg="3" xl="3">
+                            <EventCard Event="@ConvertToGetEventDetailsResponse(eventItem)" />
+                        </MudItem>
+                    }
+                </MudGrid>
+
+                @if (_filteredEvents.Count > _displayedEvents.Count)
+                {
+                    <div class="d-flex justify-content-center mt-4 mb-4">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@LoadMore" Disabled="_isLoadingMore">
+                            @if (_isLoadingMore)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                            }
+                            @I18n.GetCommon("loadMore")
+                        </MudButton>
+                    </div>
+                }
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info">
+                    @I18n.GetCommon("noEventsFound")
+                </MudAlert>
+            }
+        }
+    </MudContainer>
+}
+
+@code {
+    private bool _isAuthenticated = false;
+    private bool _isLoading = true;
+    private bool _isLoadingMore = false;
+    private string? _errorCode;
+    private List<EligibleEventDto> _originalEvents = new(); // Original unfiltered events from API
+    private List<EligibleEventDto> _allEvents = new(); // Events after radius filter
+    private List<EligibleEventDto> _filteredEvents = new();
+    private List<EligibleEventDto> _displayedEvents = new();
+    private int _currentPage = 1;
+    private int _currentRadiusKm = 25;
+    private const int MAX_RADIUS_KM = 50;
+    private const int EVENTS_PER_PAGE = 12;
+
+    private EventFilterParams _currentFilters = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        _isAuthenticated = user.Identity?.IsAuthenticated ?? false;
+
+        if (!_isAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        I18n.OnLanguageChanged += StateHasChanged;
+        EventFilterService.OnFilterChanged += HandleGlobalFilterChanged;
+        EventFilterService.OnRadiusChanged += HandleRadiusChanged;
+
+        await FilterState.InitializeAsync();
+
+        await LoadUserRadius();
+        await LoadEligibleEvents();
+
+        // Applicera sparade filter efter events har laddats
+        _currentFilters = await FilterState.GetCurrentFiltersAsync();
+        ApplyFilters();
+    }
+
+    private async Task LoadUserRadius()
+    {
+        try
+        {
+            var prefsResult = await UsersApiClient.GetUserPreferencesAsync();
+            if (prefsResult.IsSuccess && prefsResult.Value != null)
+            {
+                _currentRadiusKm = prefsResult.Value.SearchRadius;
+            }
+        }
+        catch
+        {
+            // Use default if fails
+        }
+    }
+
+    private async Task LoadEligibleEvents()
+    {
+        _isLoading = true;
+        _errorCode = null;
+
+        var request = new GetEligibleEventsRequest
+        {
+            PageNumber = 1,
+            PageSize = 100,
+            SortBy = "distance",
+            RadiusKm = MAX_RADIUS_KM
+        };
+
+        var result = await EventsApiClient.GetEligibleEventsAsync(request);
+
+        if (result.IsSuccess && result.Value != null)
+        {
+            // Save ALL events from API (within MAX_RADIUS_KM)
+            _originalEvents = result.Value.Events.ToList();
+
+            // Filter by current radius
+            _allEvents = _originalEvents
+            .Where(e => !e.DistanceKm.HasValue || e.DistanceKm.Value <= _currentRadiusKm)
+            .ToList();
+
+            ApplyFilters();
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+        }
+
+        _isLoading = false;
+    }
+
+    private void HandleFilterChange(EventFilterParams filterParams)
+    {
+        _currentFilters = filterParams;
+        _currentPage = 1;
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = _allEvents.AsEnumerable();
+
+        // Text search filter
+        if (!string.IsNullOrWhiteSpace(_currentFilters.SearchQuery))
+        {
+            var searchLower = _currentFilters.SearchQuery.ToLower();
+            filtered = filtered.Where(e =>
+            e.Title.ToLower().Contains(searchLower) ||
+            e.Description.ToLower().Contains(searchLower));
+        }
+
+        // My events filter
+        if (_currentFilters.ShowOnlyMyEvents)
+        {
+            filtered = filtered.Where(e => e.IsUserCreator || e.IsUserParticipant);
+        }
+
+        // Verified users only filter
+        if (_currentFilters.ShowOnlyVerifiedEvents)
+        {
+            filtered = filtered.Where(e => e.OnlyVerifiedUsers);
+        }
+
+        // Category filter
+        if (_currentFilters.CategoryFilters.Any())
+        {
+            filtered = filtered.Where(e => _currentFilters.CategoryFilters.Contains(e.Category));
+        }
+
+        // Gender filter
+        if (_currentFilters.GenderFilter.HasValue)
+        {
+            filtered = filtered.Where(e => e.GenderRestriction == _currentFilters.GenderFilter.Value);
+        }
+
+        // Age range filter
+        filtered = filtered.Where(e =>
+        {
+            // If event has no age restrictions, include it
+            if (!e.MinAge.HasValue && !e.MaxAge.HasValue)
+                return true;
+
+            // Check if filter age range overlaps with event age range
+            var filterMin = _currentFilters.MinAge;
+            var filterMax = _currentFilters.MaxAge;
+            var eventMin = e.MinAge ?? 18;
+            var eventMax = e.MaxAge ?? 100;
+
+            return filterMin <= eventMax && filterMax >= eventMin;
+        });
+
+        // Apply sorting
+        filtered = _currentFilters.SortBy switch
+        {
+            "distance" => filtered.OrderBy(e => e.DistanceKm ?? double.MaxValue),
+            "date" => filtered.OrderBy(e => e.DateTime),
+            "attendees" => filtered.OrderByDescending(e => e.CurrentAttendance),
+            "spotsLeft" => filtered.OrderBy(e => e.MaxAttendance - e.CurrentAttendance),
+            _ => filtered.OrderBy(e => e.DistanceKm ?? double.MaxValue)
+        };
+
+        _filteredEvents = filtered.ToList();
+        _displayedEvents = _filteredEvents.Take(EVENTS_PER_PAGE).ToList();
+        StateHasChanged();
+    }
+
+    private async Task LoadMore()
+    {
+        _isLoadingMore = true;
+        _currentPage++;
+
+        var newEvents = _filteredEvents
+        .Skip((_currentPage - 1) * EVENTS_PER_PAGE)
+        .Take(EVENTS_PER_PAGE)
+        .ToList();
+
+        _displayedEvents.AddRange(newEvents);
+
+        _isLoadingMore = false;
+        await Task.CompletedTask;
+    }
+
+    private GetEventDetailsResponse ConvertToGetEventDetailsResponse(EligibleEventDto dto)
+    {
+        return new GetEventDetailsResponse
+        {
+            Id = dto.Id,
+            EventHash = dto.EventHash,
+            Title = dto.Title,
+            Description = dto.Description,
+            Location = dto.Location,
+            Latitude = dto.Latitude,
+            Longitude = dto.Longitude,
+            DateTime = dto.DateTime,
+            CreatedAt = dto.CreatedAt,
+            CategoryId = dto.CategoryId,
+            Category = dto.Category,
+            MinAttendance = dto.MinAttendance,
+            MaxAttendance = dto.MaxAttendance,
+            CurrentAttendance = dto.CurrentAttendance,
+            MinAge = dto.MinAge,
+            MaxAge = dto.MaxAge,
+            ImageUrl = dto.ImageUrl,
+            IsUserParticipant = dto.IsUserParticipant,
+            IsUserCreator = dto.IsUserCreator,
+            CreatedByUserId = 0,
+            CreatedByUserName = string.Empty,
+            GenderRestriction = dto.GenderRestriction,
+            Status = EventStatus.Active,
+            IsPublic = true,
+            OnlyVerifiedUsers = dto.OnlyVerifiedUsers
+        };
+    }
+
+    private async void HandleGlobalFilterChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadUserRadius();
+            await LoadEligibleEvents();
+            StateHasChanged();
+        });
+    }
+
+    private void HandleRadiusChanged(int newRadiusKm)
+    {
+        InvokeAsync(() =>
+        {
+            _currentRadiusKm = newRadiusKm;
+
+            // Filter from ORIGINAL events, not from already filtered _allEvents
+            _allEvents = _originalEvents
+    .Where(e => !e.DistanceKm.HasValue || e.DistanceKm.Value <= _currentRadiusKm)
+    .ToList();
+
+            ApplyFilters();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+        EventFilterService.OnFilterChanged -= HandleGlobalFilterChanged;
+        EventFilterService.OnRadiusChanged -= HandleRadiusChanged;
+    }
+}

@@ -1,0 +1,436 @@
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Common
+@using Client.Common
+@implements IDisposable
+@inject II18nService I18n
+@inject IUsersApiClient UsersApiClient
+@inject IEventFilterStateService FilterState
+
+<div class="event-filter-container">
+    <MudPaper Elevation="0" Class="event-filter-paper">
+        @* Top Row - Always Visible *@
+        <MudGrid Spacing="2" Class="align-center">
+            @* Search Bar *@
+            <MudItem xs="10" lg="4">
+                <MudTextField @bind-Value="SearchQuery" @bind-Value:after="OnSearchChanged"
+                              Placeholder="@I18n.GetCommon("searchEvents")" Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Immediate="true" DebounceInterval="300" Class="filter-search-field" />
+            </MudItem>
+
+            @* Expand/Collapse Button - Visible on mobile and tablet, hidden on desktop *@
+            <MudItem xs="2" Class="d-flex d-lg-none justify-end align-center">
+                <MudIconButton
+                Icon="@(_isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                Color="Color.Primary" OnClick="ToggleExpand" Size="Size.Medium" />
+            </MudItem>
+
+            @* Desktop Filters - Hidden on mobile/tablet, always visible on desktop *@
+            @if (_isExpanded || !_isMobile)
+            {
+                @* Sort By Dropdown *@
+                <MudItem xs="6" lg="2" Class="d-none d-lg-block">
+                    <MudSelect @bind-Value="SelectedSortBy" @bind-Value:after="OnSortChanged"
+                               Label="@I18n.GetCommon("sortBy")" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                               Class="filter-select">
+                        <MudSelectItem Value="@("distance")">@I18n.GetCommon("sortByDistance")</MudSelectItem>
+                        <MudSelectItem Value="@("date")">@I18n.GetCommon("sortByTime")</MudSelectItem>
+                        <MudSelectItem Value="@("attendees")">@I18n.GetCommon("sortByAttendees")</MudSelectItem>
+                        <MudSelectItem Value="@("spotsLeft")">@I18n.GetCommon("sortBySpotsLeft")</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                @* Gender Filter *@
+                <MudItem xs="6" lg="2" Class="d-none d-lg-block">
+                    <MudSelect T="GenderRestriction?" @bind-Value="SelectedGender" @bind-Value:after="OnFilterChanged"
+                               Label="@I18n.GetCommon("gender")" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                               Class="filter-select"
+                               ToStringFunc="@(g => g.HasValue ? GetGenderRestrictionLabel(g.Value) : I18n.GetCommon("allGenders"))">
+                        <MudSelectItem T="GenderRestriction?" Value="@((GenderRestriction?)null)">
+                            @I18n.GetCommon("allGenders")</MudSelectItem>
+                            @if (_userGenderRestriction.HasValue)
+                            {
+                                <MudSelectItem T="GenderRestriction?" Value="@_userGenderRestriction">
+                                    @GetGenderRestrictionLabel(_userGenderRestriction.Value)
+                                </MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+
+                    @* Age Range Slider *@
+                    @if (_userAge.HasValue)
+                    {
+                        <MudItem xs="6" lg="2" Class="d-none d-lg-flex align-center">
+                            <RangeSlider Min="18" Max="99" Step="1" @bind-MinValue="MinAgeValue" @bind-MaxValue="MaxAgeValue"
+                                         OnChange="OnFilterChanged" Label="@I18n.GetCommon("ageRange")" UserAge="_userAge"
+                                         Type="RangeSlider.SliderType.Age" />
+                        </MudItem>
+                    }
+
+                    @* Expand/Collapse Button - Desktop (only show on lg and up) *@
+                    <MudItem xs="12" lg="2" Class="d-none d-lg-flex justify-end align-center">
+                        <MudIconButton
+                        Icon="@(_isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                        Color="Color.Primary" OnClick="ToggleExpand" Size="Size.Medium" />
+                    </MudItem>
+                }
+            </MudGrid>
+
+            @* Expandable Section - All Mobile/Tablet Filters & Additional Filters *@
+            @if (_isExpanded)
+            {
+                @* Mobile/Tablet-only filters (shown when expanded on mobile and tablet) *@
+                <MudGrid Spacing="2" Class="mt-2 d-lg-none">
+                    @* Sort By Dropdown - Mobile *@
+                    <MudItem xs="6">
+                        <MudSelect @bind-Value="SelectedSortBy" @bind-Value:after="OnSortChanged"
+                                   Label="@I18n.GetCommon("sortBy")" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                   Class="filter-select">
+                            <MudSelectItem Value="@("distance")">@I18n.GetCommon("sortByDistance")</MudSelectItem>
+                            <MudSelectItem Value="@("date")">@I18n.GetCommon("sortByTime")</MudSelectItem>
+                            <MudSelectItem Value="@("attendees")">@I18n.GetCommon("sortByAttendees")</MudSelectItem>
+                            <MudSelectItem Value="@("spotsLeft")">@I18n.GetCommon("sortBySpotsLeft")</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+
+                    @* Gender Filter - Mobile *@
+                    <MudItem xs="6">
+                        <MudSelect T="GenderRestriction?" @bind-Value="SelectedGender" @bind-Value:after="OnFilterChanged"
+                                   Label="@I18n.GetCommon("gender")" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                   Class="filter-select"
+                                   ToStringFunc="@(g => g.HasValue ? GetGenderRestrictionLabel(g.Value) : I18n.GetCommon("allGenders"))">
+                            <MudSelectItem T="GenderRestriction?" Value="@((GenderRestriction?)null)">
+                                @I18n.GetCommon("allGenders")</MudSelectItem>
+                                @if (_userGenderRestriction.HasValue)
+                                {
+                                    <MudSelectItem T="GenderRestriction?" Value="@_userGenderRestriction">
+                                        @GetGenderRestrictionLabel(_userGenderRestriction.Value)
+                                    </MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+
+                        @* Age Range Slider - Mobile *@
+                        @if (_userAge.HasValue)
+                        {
+                            <MudItem xs="12" Class="d-flex align-center">
+                                <RangeSlider Min="18" Max="99" Step="1" @bind-MinValue="MinAgeValue" @bind-MaxValue="MaxAgeValue"
+                                             OnChange="OnFilterChanged" Label="@I18n.GetCommon("ageRange")" UserAge="_userAge"
+                                             Type="RangeSlider.SliderType.Age" />
+                            </MudItem>
+                        }
+                    </MudGrid>
+
+                    @* Category Filters *@
+                    <MudGrid Spacing="1" Class="mt-2">
+                        <MudItem xs="12">
+                            @* <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+                        @I18n.GetCommon("categories"):
+                    </MudText> *@
+                            <div class="category-scroll-container">
+                                @foreach (var category in CategoryTypeExtensions.GetAll())
+                                {
+                                    var isSelected = SelectedCategories.Contains(category);
+                                    var categoryColor = CategoryIconHelper.GetColorForCategory(category);
+                                    <MudButton Variant="@(isSelected? Variant.Filled: Variant.Outlined)"
+                                               Color="@(isSelected ? categoryColor : Color.Default)" Class="category-chip"
+                                               OnClick="@(() => OnCategoryToggle(category, !isSelected))">
+                                        <MudIcon Icon="@CategoryIconHelper.GetIconForCategory(category)"
+                                                 Color="@(isSelected ? Color.Surface : categoryColor)" Size="Size.Small" Class="mr-2" />
+                                        @I18n.GetCommon(category.GetLocalizationKey())
+                                    </MudButton>
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    @* Switches Section *@
+                    @if (_isUserVerified)
+                    {
+                        <MudGrid Spacing="2" Class="mt-2">
+                            <MudItem xs="12" sm="6" md="4" Class="d-flex align-center">
+                                <MudSwitch @bind-Value="ShowOnlyVerifiedEvents" @bind-Value:after="OnFilterChanged" Color="Color.Info"
+                                           Label="@I18n.GetCommon("showOnlyVerifiedEvents")"                            Class="filter-switch" />
+                            </MudItem>
+                        </MudGrid>
+                    }
+                }
+
+                @* Results Count *@
+                <MudGrid Spacing="1" Class="mt-2">
+                    <MudItem xs="12" Class="d-flex justify-space-between align-center">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="x-of-y-display">
+                            @string.Format(I18n.GetCommon("showingXOfY"), FilteredCount, TotalCount)
+                        </MudText>
+                        @if (HasActiveFilters)
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearFilters">
+                                @I18n.GetCommon("clearFilters")
+                            </MudButton>
+                        }
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </div>
+
+@code {
+    [Parameter]
+    public EventCallback<EventFilterParams> OnFilterChange { get; set; }
+
+    [Parameter]
+    public int TotalCount { get; set; }
+
+    [Parameter]
+    public int FilteredCount { get; set; }
+
+    private string _searchQuery = string.Empty;
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            if (_searchQuery != value)
+            {
+                _searchQuery = value;
+                _ = FilterState.SetSearchQueryAsync(value);
+            }
+        }
+    }
+
+    private string _selectedSortBy = "distance";
+    public string SelectedSortBy
+    {
+        get => _selectedSortBy;
+        set
+        {
+            if (_selectedSortBy != value)
+            {
+                _selectedSortBy = value;
+                _ = FilterState.SetSelectedSortByAsync(value);
+            }
+        }
+    }
+
+    private bool _showOnlyMyEvents = false;
+    public bool ShowOnlyMyEvents
+    {
+        get => _showOnlyMyEvents;
+        set
+        {
+            if (_showOnlyMyEvents != value)
+            {
+                _showOnlyMyEvents = value;
+                _ = FilterState.SetShowOnlyMyEventsAsync(value);
+            }
+        }
+    }
+
+    private bool _showOnlyVerifiedEvents = false;
+    public bool ShowOnlyVerifiedEvents
+    {
+        get => _showOnlyVerifiedEvents;
+        set
+        {
+            if (_showOnlyVerifiedEvents != value)
+            {
+                _showOnlyVerifiedEvents = value;
+                _ = FilterState.SetShowOnlyVerifiedEventsAsync(value);
+            }
+        }
+    }
+
+    private HashSet<CategoryType> _selectedCategories = new();
+    public HashSet<CategoryType> SelectedCategories
+    {
+        get => _selectedCategories;
+        set => _selectedCategories = value;
+    }
+
+    private async Task OnCategoryToggle(CategoryType category, bool isChecked)
+    {
+        if (isChecked)
+        {
+            _selectedCategories.Add(category);
+        }
+        else
+        {
+            _selectedCategories.Remove(category);
+        }
+        await FilterState.SetSelectedCategoriesAsync(_selectedCategories);
+        await OnFilterChanged();
+    }
+
+    private GenderRestriction? _selectedGender = null;
+    public GenderRestriction? SelectedGender
+    {
+        get => _selectedGender;
+        set
+        {
+            if (_selectedGender != value)
+            {
+                _selectedGender = value;
+                _ = FilterState.SetSelectedGenderAsync(value);
+            }
+        }
+    }
+
+    private int _minAgeValue = 18;
+    public int MinAgeValue
+    {
+        get => _minAgeValue;
+        set
+        {
+            if (_minAgeValue != value && value >= 18 && value < _maxAgeValue)
+            {
+                _minAgeValue = value;
+                _ = FilterState.SetMinAgeValueAsync(value);
+            }
+        }
+    }
+
+    private int _maxAgeValue = 99;
+    public int MaxAgeValue
+    {
+        get => _maxAgeValue;
+        set
+        {
+            if (_maxAgeValue != value && value <= 99 && value > _minAgeValue)
+            {
+                _maxAgeValue = value;
+                _ = FilterState.SetMaxAgeValueAsync(value);
+            }
+        }
+    }
+
+    private int? _userAge = null;
+    private GenderRestriction? _userGenderRestriction = null;
+    private bool _isUserVerified = false;
+    private bool _isExpanded = false;
+    private bool _isMobile = false;
+
+    private bool HasActiveFilters =>
+    !string.IsNullOrWhiteSpace(SearchQuery) ||
+    ShowOnlyMyEvents ||
+    ShowOnlyVerifiedEvents ||
+    SelectedCategories.Any() ||
+    SelectedGender.HasValue ||
+    MinAgeValue > 18 ||
+    MaxAgeValue < 99;
+
+    private void ToggleExpand()
+    {
+        _isExpanded = !_isExpanded;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await FilterState.InitializeAsync();
+
+        // Ladda värden från LocalStorage
+        _searchQuery = await FilterState.GetSearchQueryAsync();
+        _selectedSortBy = await FilterState.GetSelectedSortByAsync();
+        _showOnlyMyEvents = await FilterState.GetShowOnlyMyEventsAsync();
+        _showOnlyVerifiedEvents = await FilterState.GetShowOnlyVerifiedEventsAsync();
+        _selectedCategories = await FilterState.GetSelectedCategoriesAsync();
+        _selectedGender = await FilterState.GetSelectedGenderAsync();
+        _minAgeValue = await FilterState.GetMinAgeValueAsync();
+        _maxAgeValue = await FilterState.GetMaxAgeValueAsync();
+
+        I18n.OnLanguageChanged += StateHasChanged;
+
+        // Fetch user's age, gender, and verified status
+        try
+        {
+            var profileResult = await UsersApiClient.GetUserProfileAsync();
+            if (profileResult.IsSuccess && profileResult.Value != null)
+            {
+                // Get user verified status
+                _isUserVerified = profileResult.Value.IsVerified;
+
+                // Get user age
+                if (profileResult.Value.BirthDate.HasValue)
+                {
+                    var birthDate = profileResult.Value.BirthDate.Value;
+                    var today = DateTime.Today;
+                    var age = today.Year - birthDate.Year;
+                    if (birthDate.Date > today.AddYears(-age)) age--;
+                    _userAge = age;
+                }
+
+                // Get user gender and map to restriction
+                if (profileResult.Value.Gender.HasValue)
+                {
+                    _userGenderRestriction = profileResult.Value.Gender.Value switch
+                    {
+                        Gender.Male => GenderRestriction.MaleOnly,
+                        Gender.Female => GenderRestriction.FemaleOnly,
+                        Gender.NonBinary => GenderRestriction.NonBinaryOnly,
+                        _ => null
+                    };
+                }
+            }
+        }
+        catch
+        {
+            // If we can't get user profile, they can still use the filter without restrictions
+        }
+    }
+
+    private string GetGenderRestrictionLabel(GenderRestriction restriction)
+    {
+        return restriction switch
+        {
+            GenderRestriction.MaleOnly => I18n.GetCommon("maleOnly"),
+            GenderRestriction.FemaleOnly => I18n.GetCommon("femaleOnly"),
+            GenderRestriction.NonBinaryOnly => I18n.GetCommon("nonBinaryOnly"),
+            _ => I18n.GetCommon("allGenders")
+        };
+    }
+
+    private async Task OnSearchChanged()
+    {
+        await NotifyFilterChanged();
+    }
+
+    private async Task OnSortChanged()
+    {
+        await NotifyFilterChanged();
+    }
+
+    private async Task OnFilterChanged()
+    {
+        await NotifyFilterChanged();
+    }
+
+    private async Task NotifyFilterChanged()
+    {
+        var filterParams = await FilterState.GetCurrentFiltersAsync();
+        await OnFilterChange.InvokeAsync(filterParams);
+    }
+
+    private async Task ClearFilters()
+    {
+        await FilterState.ResetFiltersAsync();
+
+        // Uppdatera lokala värden
+        _searchQuery = string.Empty;
+        _selectedSortBy = "distance";
+        _showOnlyMyEvents = false;
+        _showOnlyVerifiedEvents = false;
+        _selectedCategories.Clear();
+        _selectedGender = null;
+        _minAgeValue = 18;
+        _maxAgeValue = 99;
+
+        await NotifyFilterChanged();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

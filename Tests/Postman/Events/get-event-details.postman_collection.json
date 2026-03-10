@@ -1,0 +1,190 @@
+{
+  "info": {
+    "name": "Events - Get Event Details",
+    "description": "Tests for GetEventDetails endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Get Event Details - Success",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has all required fields\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('id');",
+              "    pm.expect(response).to.have.property('title');",
+              "    pm.expect(response).to.have.property('description');",
+              "    pm.expect(response).to.have.property('location');",
+              "    pm.expect(response).to.have.property('dateTime');",
+              "    pm.expect(response).to.have.property('createdByUserName');",
+              "    pm.expect(response).to.have.property('categoryName');",
+              "    pm.expect(response).to.have.property('currentAttendance');",
+              "    pm.expect(response).to.have.property('maxAttendance');",
+              "});",
+              "",
+              "pm.test(\"Response has creator info\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('isUserCreator');",
+              "    pm.expect(response).to.have.property('isUserParticipant');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Get Event Details - Non-Existent Event",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/99999",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "99999"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Event Details - Verify Creator Flag",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"isUserCreator is true for creator\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response.isUserCreator).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Note: This test assumes you are authenticated as the event creator"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Get Event Details - Verify Attendance Count",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"CurrentAttendance is valid number\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response.currentAttendance).to.be.a('number');",
+              "    pm.expect(response.currentAttendance).to.be.at.least(0);",
+              "    pm.expect(response.currentAttendance).to.be.at.most(response.maxAttendance);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. Get Event Details - Check Location Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Location data is present\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('location');",
+              "    pm.expect(response.location).to.be.a('string');",
+              "    ",
+              "    if (response.latitude !== null && response.longitude !== null) {",
+              "        pm.expect(response.latitude).to.be.a('number');",
+              "        pm.expect(response.longitude).to.be.a('number');",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

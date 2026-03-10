@@ -1,0 +1,105 @@
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Helpers
+@using Client.Services
+@inject II18nService I18n
+
+@* Profile Badges - Renders below profile image/avatar *@
+<div class="@ContainerClass">
+    @foreach (var badge in ProfileBadgeHelper.GetProfileBadges(
+            IsVerified,
+            Gender,
+            BirthDate,
+            IsBlocked,
+            ShowBlocked))
+    {
+        @if (badge.Type == ProfileBadgeHelper.BadgeType.Age)
+        {
+            <MudTooltip Text="@($"{badge.CustomTooltip} {I18n.GetCommon("yearsOld")}")">
+                <div class="@GetBadgeClass() @badge.CssClass">
+                    <MudText Typo="@GetBadgeTextSize()" Class="@GetAgeTextClass()">
+                        @badge.DisplayText
+                    </MudText>
+                </div>
+            </MudTooltip>
+        }
+        else
+        {
+            <MudTooltip Text="@I18n.GetCommon(badge.TooltipKey)">
+                <div class="@GetBadgeClass() @badge.CssClass">
+                    <MudIcon Icon="@badge.Icon" Size="@GetBadgeIconSize()" />
+                </div>
+            </MudTooltip>
+        }
+    }
+</div>
+
+@code {
+    [Parameter]
+    public bool IsVerified { get; set; }
+
+    [Parameter]
+    public Gender? Gender { get; set; }
+
+    [Parameter]
+    public DateTime? BirthDate { get; set; }
+
+    [Parameter]
+    public bool IsBlocked { get; set; }
+
+    [Parameter]
+    public bool ShowBlocked { get; set; } = true;
+
+    [Parameter]
+    public BadgeSize Size { get; set; } = BadgeSize.Medium;
+
+    [Parameter]
+    public string ContainerClass { get; set; } = "profile-card-badges";
+
+    private string GetBadgeClass()
+    {
+        return Size switch
+        {
+            BadgeSize.Small => "profile-badge", // For ViewProfile (uses profile-badge class)
+            BadgeSize.Large => "profile-badge",
+            _ => "profile-card-badge" // For ProfileCard (uses profile-card-badge class)
+        };
+    }
+
+    private Size GetBadgeIconSize()
+    {
+        return Size switch
+        {
+            BadgeSize.Small => MudBlazor.Size.Small,
+            BadgeSize.Large => MudBlazor.Size.Medium,
+            _ => MudBlazor.Size.Small
+        };
+    }
+
+    private Typo GetBadgeTextSize()
+    {
+        return Size switch
+        {
+            BadgeSize.Small => Typo.caption,
+            BadgeSize.Large => Typo.body2,
+            _ => Typo.caption
+        };
+    }
+
+    private string GetAgeTextClass()
+    {
+        return Size switch
+        {
+            BadgeSize.Small => "age-text",
+            BadgeSize.Large => "age-text",
+            _ => "profile-card-age-text"
+        };
+    }
+
+    public enum BadgeSize
+    {
+        Small,
+        Medium,
+        Large
+    }
+}

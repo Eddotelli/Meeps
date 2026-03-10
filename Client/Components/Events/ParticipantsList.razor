@@ -1,0 +1,348 @@
+@using Shared.Contracts.Events
+@using Shared.Enums
+@using Shared.Common.Constants
+@using Shared.Extensions
+@using Client.Helpers
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Common
+@inject II18nService I18n
+@inject IEventsApiClient EventsApiClient
+@inject ILogger<ParticipantsList> Logger
+@inject ISnackbar Snackbar
+
+@* Overlay to close popover when clicking outside *@
+<MudOverlay Visible="@(selectedParticipant != null)" OnClick="@ClosePopover" ZIndex="1200" />
+
+@if (IsUserCreator && AllParticipants.Any())
+{
+    <MudText Typo="Typo.h6" Class="mb-3">
+        @GetAllParticipantsText()
+    </MudText>
+
+    <div class="d-flex flex-wrap participants-flex-container mb-4">
+        @foreach (var participant in AllParticipants)
+        {
+            <div class="participant-avatar-container @(participant.IsBlocked ? "blocked-participant" : "")">
+                <MudBadge Icon="@Icons.Material.Filled.Block" Color="Color.Error" Overlap="true"
+                            Visible="@participant.IsBlocked" Class="participant-badge-clickable">
+                    <div class="d-flex flex-column align-center participant-avatar-flex"
+                            @onclick="@(() => TogglePopover(participant))">
+                        @if (!string.IsNullOrEmpty(participant.ProfileImageUrl))
+                        {
+                            <MudAvatar Size="Size.Large" Class="participant-avatar">
+                                <MudImage Src="@participant.ProfileImageUrl" />
+                            </MudAvatar>
+                        }
+                        else
+                        {
+                            <MudAvatar Color="@(participant.IsBlocked? Color.Error: Color.Primary)" Size="Size.Large"
+                                        Class="participant-avatar">
+                                @UserHelper.GetInitials(participant.DisplayName ?? participant.Username)
+                            </MudAvatar>
+                        }
+                        <MudText Typo="Typo.caption" Align="Align.Center" Class="participant-name-label">
+                            @(participant.DisplayName ?? participant.Username)
+                        </MudText>
+                    </div>
+                </MudBadge>
+
+                <MudPopover Open="@(selectedParticipant?.UserId == participant.UserId)" AnchorOrigin="Origin.BottomCenter"
+                            TransformOrigin="Origin.TopCenter" Class="participant-popover">
+                    <MudCard Class="participant-popover-card">
+                        @* Close button - Top Right *@
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" Size="Size.Small"
+                                        OnClick="@(() => ClosePopover())" Class="popover-close-button"
+                                        aria-label="@I18n.GetCommon("close")" />
+
+                        <MudCardContent Class="pt-5">
+                            @* Profile Card *@
+                            <div class="mb-4">
+                                <ProfileCard ProfileImageUrl="@participant.ProfileImageUrl"
+                                                DisplayName="@(participant.DisplayName ?? participant.Username)" Age="@participant.Age"
+                                                Gender="@participant.Gender" IsVerified="@participant.IsVerified"
+                                                IsBlocked="@participant.IsBlocked" Size="ProfileCard.ProfileCardSize.Medium"
+                                                ShowName="true" />
+                            </div>
+
+                            @* Role/Status Section *@
+                            <div class="d-flex justify-center mb-3">
+                                @if (participant.Role == EventRole.Creator || participant.Role == EventRole.CoOrganizer)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled"
+                                                Icon="@Icons.Material.Filled.Star">
+                                        @I18n.GetCommon("organizer")
+                                    </MudChip>
+                                }
+                                else if (participant.IsBlocked)
+                                {
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                                                    Icon="@Icons.Material.Filled.Block">
+                                            @I18n.GetCommon("blocked")
+                                        </MudChip>
+                                        
+                                        <MudMenu AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.BottomLeft" Dense="true">
+                                            <ActivatorContent>
+                                                <MudIconButton Icon="@Icons.Material.Outlined.Info" 
+                                                               Size="Size.Small" 
+                                                               Color="Color.Default"
+                                                               aria-label="Block information" />
+                                            </ActivatorContent>
+                                            <ChildContent>
+                                                <MudPaper Class="pa-4" Elevation="0" Style="max-width: 300px;">
+                                                    <MudText Typo="Typo.body2" Class="mb-2">
+                                                        <strong>@I18n.GetCommon("blockedAt"):</strong>
+                                                        @participant.BlockedAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm")
+                                                    </MudText>
+                                                    @if (!string.IsNullOrEmpty(participant.BlockedReason))
+                                                    {
+                                                        <MudText Typo="Typo.body2">
+                                                            <strong>@I18n.GetCommon("reason"):</strong> @participant.BlockedReason
+                                                        </MudText>
+                                                    }
+                                                </MudPaper>
+                                            </ChildContent>
+                                        </MudMenu>
+                                    </MudStack>
+                                }
+                            </div>
+                        </MudCardContent>
+
+                        <MudCardActions>
+                            @if (participant.Role == EventRole.Participant)
+                            {
+                                @if (!participant.IsBlocked)
+                                {
+                                    <MudButton Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Block"
+                                                OnClick="@(() => OpenBlockDialog(participant))">
+                                        @I18n.GetCommon("block")
+                                    </MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Color="Color.Success" Size="Size.Small" StartIcon="@Icons.Material.Filled.LockOpen"
+                                                OnClick="@(() => HandleUnblockParticipant(participant))" Disabled="@isUnblocking">
+                                        @I18n.GetCommon("unblock")
+                                    </MudButton>
+                                }
+                            }
+                        </MudCardActions>
+                    </MudCard>
+                </MudPopover>
+            </div>
+        }
+    </div>
+}
+
+@* Block confirmation dialog *@
+<ConfirmationDialog IsVisible="@showBlockDialog" IsVisibleChanged="@((value) => showBlockDialog = value)"
+                    IsProcessing="@isBlocking" Title="@I18n.GetCommon("blockFromEvent")" Message="@GetBlockMessage()"
+                    WarningMessage="@(!string.IsNullOrEmpty(errorCode) ? I18n.GetError(errorCode) : null)"
+                    ConfirmButtonText="@I18n.GetCommon("block")" ConfirmButtonColor="Color.Error" OnConfirm="HandleBlockParticipant">
+    <CustomContent>
+        <MudTextField @bind-Value="blockReason" Label="@I18n.GetCommon("reason")" Variant="Variant.Outlined" Lines="3"
+                      Class="mt-4 mb-4" HelperText="@I18n.GetHelpText("blockReason")" />
+    </CustomContent>
+</ConfirmationDialog>
+
+@code {
+    [Parameter]
+    public List<EventParticipantDto> Participants { get; set; } = new();
+
+    [Parameter]
+    public List<EventParticipantDto> BlockedParticipants { get; set; } = new();
+
+    [Parameter]
+    public bool IsUserCreator { get; set; }
+
+    [Parameter]
+    public int EventId { get; set; }
+
+    [Parameter]
+    public EventCallback OnParticipantBlocked { get; set; }
+
+    private bool showBlockDialog;
+    private EventParticipantDto? participantToBlock;
+    private EventParticipantDto? selectedParticipant;
+    private string blockReason = string.Empty;
+    private string? errorCode;
+    private bool isBlocking;
+    private bool isUnblocking;
+
+    private List<EventParticipantDto> AllParticipants =>
+    Participants.Concat(BlockedParticipants).ToList();
+
+    private string GetAllParticipantsText()
+    {
+        var activeCount = Participants.Count;
+        var blockedCount = BlockedParticipants.Count;
+        var total = activeCount + blockedCount;
+
+        if (blockedCount > 0)
+        {
+            return $"{I18n.GetCommon("participants")} ({activeCount}) • {I18n.GetCommon("blocked")} ({blockedCount})";
+        }
+
+        return $"{I18n.GetCommon("participants")} ({total})";
+    }
+
+    private void TogglePopover(EventParticipantDto participant)
+    {
+        if (selectedParticipant?.UserId == participant.UserId)
+        {
+            selectedParticipant = null;
+        }
+        else
+        {
+            selectedParticipant = participant;
+        }
+        StateHasChanged();
+    }
+
+    private void ClosePopover()
+    {
+        selectedParticipant = null;
+        StateHasChanged();
+    }
+
+    private string GetBlockMessage()
+    {
+        if (participantToBlock == null)
+            return string.Empty;
+
+        return $"{I18n.GetMessage("confirmBlockParticipant")} {participantToBlock.DisplayName ?? participantToBlock.Username}?";
+    }
+
+
+
+    private void OpenBlockDialog(EventParticipantDto participant)
+    {
+        Logger.LogInformation("OpenBlockDialog called for participant: {UserId} ({Username})",
+        participant.UserId, participant.Username);
+
+        participantToBlock = participant;
+        blockReason = string.Empty;
+        errorCode = null;
+        showBlockDialog = true;
+        selectedParticipant = null; // Close popover when opening dialog
+
+        Logger.LogInformation("Dialog state set: showBlockDialog = {ShowDialog}", showBlockDialog);
+        StateHasChanged();
+    }
+
+    private async Task HandleBlockParticipant()
+    {
+        Logger.LogInformation("HandleBlockParticipant called");
+
+        if (participantToBlock == null)
+        {
+            Logger.LogWarning("participantToBlock is null, returning");
+            return;
+        }
+
+        Logger.LogInformation("Blocking participant {UserId} from event {EventId}",
+        participantToBlock.UserId, EventId);
+
+        isBlocking = true;
+        errorCode = null;
+
+        try
+        {
+            var request = new BlockParticipantRequest
+            {
+                EventId = EventId,
+                UserId = participantToBlock.UserId,
+                Reason = string.IsNullOrWhiteSpace(blockReason) ? null : blockReason
+            };
+
+            Logger.LogInformation("Sending BlockParticipantAsync request: EventId={EventId}, UserId={UserId}, Reason={Reason}",
+            request.EventId, request.UserId, request.Reason ?? "(null)");
+
+            var result = await EventsApiClient.BlockParticipantAsync(request);
+
+            if (result.IsFailure)
+            {
+                Logger.LogError("BlockParticipantAsync failed: {ErrorCode} - {ErrorMessage}",
+                result.Error?.Code, result.Error?.Message);
+                errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+                StateHasChanged();
+                return;
+            }
+
+            Logger.LogInformation("Participant blocked successfully");
+
+            // Success - close dialog and notify parent
+            showBlockDialog = false;
+            participantToBlock = null;
+            blockReason = string.Empty;
+            errorCode = null;
+
+            Snackbar.Add(I18n.GetMessage(MessageKeys.ParticipantBlocked), Severity.Success);
+            await OnParticipantBlocked.InvokeAsync();
+
+            Logger.LogInformation("Parent notified of successful block");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception occurred while blocking participant");
+            errorCode = ErrorCodes.ServerError;
+            StateHasChanged();
+        }
+        finally
+        {
+            isBlocking = false;
+            Logger.LogInformation("isBlocking set to false");
+        }
+    }
+
+    private async Task HandleUnblockParticipant(EventParticipantDto participant)
+    {
+        Logger.LogInformation("Unblocking participant {UserId} from event {EventId}",
+        participant.UserId, EventId);
+
+        isUnblocking = true;
+        errorCode = null;
+        selectedParticipant = null; // Close popover
+
+        try
+        {
+            var request = new UnblockParticipantRequest
+            {
+                EventId = EventId,
+                UserId = participant.UserId
+            };
+
+            Logger.LogInformation("Sending UnblockParticipantAsync request: EventId={EventId}, UserId={UserId}",
+            request.EventId, request.UserId);
+
+            var result = await EventsApiClient.UnblockParticipantAsync(request);
+
+            if (result.IsFailure)
+            {
+                Logger.LogError("UnblockParticipantAsync failed: {ErrorCode} - {ErrorMessage}",
+                result.Error?.Code, result.Error?.Message);
+                errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+                StateHasChanged();
+                return;
+            }
+
+            Logger.LogInformation("Participant unblocked successfully");
+
+            // Notify parent to reload
+            Snackbar.Add(I18n.GetMessage(MessageKeys.ParticipantUnblocked), Severity.Success);
+            await OnParticipantBlocked.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception occurred while unblocking participant");
+            errorCode = ErrorCodes.ServerError;
+            StateHasChanged();
+        }
+        finally
+        {
+            isUnblocking = false;
+            Logger.LogInformation("isUnblocking set to false");
+        }
+    }
+}

@@ -1,0 +1,711 @@
+{
+  "info": {
+    "name": "Events - Create Event",
+    "description": "Core tests for CreateEvent endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Create Event - Valid Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test(\"Response has eventId\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventId');",
+              "    pm.expect(response.eventId).to.be.a('number');",
+              "    pm.environment.set('lastCreatedEventId', response.eventId);",
+              "});",
+              "",
+              "pm.test(\"Response has title\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response.title).to.equal(pm.variables.get('eventTitle'));",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const timestamp = new Date().getTime();",
+              "pm.variables.set('eventTitle', `Test Event ${timestamp}`);",
+              "",
+              "const tomorrow = new Date();",
+              "tomorrow.setDate(tomorrow.getDate() + 1);",
+              "tomorrow.setHours(18, 0, 0, 0);",
+              "pm.variables.set('eventDateTime', tomorrow.toISOString());"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"{{eventTitle}}\",\n  \"description\": \"This is a test event created via Postman.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"eventDateTime\": \"{{eventDateTime}}\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Create Event - No Authentication",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 401 Unauthorized\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Unauthorized Event\",\n  \"description\": \"This should fail.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Create Event - Invalid Title",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"AB\",\n  \"description\": \"Title is too short.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Create Event - Past DateTime",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Past Event\",\n  \"description\": \"Event date is in the past.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2020-01-01T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. Create Event - Invalid Category",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Invalid Category Event\",\n  \"description\": \"Category does not exist.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 9999,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        }
+      },
+  "response": []
+},
+    {
+      "name": "1. Create Event - Valid Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test(\"Response has eventId\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventId');",
+              "    pm.expect(response.eventId).to.be.a('number');",
+              "    pm.environment.set('lastCreatedEventId', response.eventId);",
+              "});",
+              "",
+              "pm.test(\"Response has title\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('title');",
+              "    pm.expect(response.title).to.equal(pm.variables.get('eventTitle'));",
+              "});",
+              "",
+              "pm.test(\"Response has eventDateTime\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventDateTime');",
+              "});",
+              "",
+              "pm.test(\"Response has message\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('message');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Generate unique title for this test",
+              "const timestamp = new Date().getTime();",
+              "pm.variables.set('eventTitle', `Test Event ${timestamp}`);",
+              "",
+              "// Set event date to tomorrow at 18:00",
+              "const tomorrow = new Date();",
+              "tomorrow.setDate(tomorrow.getDate() + 1);",
+              "tomorrow.setHours(18, 0, 0, 0);",
+              "pm.variables.set('eventDateTime', tomorrow.toISOString());"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"{{eventTitle}}\",\n  \"description\": \"This is a test event created via Postman to verify the CreateEvent endpoint functionality.\",\n  \"location\": \"Stockholm, Sweden\",\n  \"eventDateTime\": \"{{eventDateTime}}\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Creates a new event with valid data. Requires authentication."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Create Event - No Authentication",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 401 Unauthorized\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Unauthorized Event\",\n  \"description\": \"This should fail without authentication.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create an event without authentication token. Should return 401."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Create Event - Invalid Title (Too Short)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error for Title\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "    pm.expect(response.errors).to.have.property('Title');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"AB\",\n  \"description\": \"This event has a title that is too short (less than 3 characters).\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event with title less than 3 characters. Should return 400 with validation error."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Create Event - Invalid Title (Too Long)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error for Title\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "    pm.expect(response.errors).to.have.property('Title');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"This is a very long title that exceeds the maximum allowed length of 100 characters for event titles in the system\",\n  \"description\": \"This event has a title that is too long.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event with title exceeding 100 characters. Should return 400 with validation error."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Create Event - Invalid Description (Too Short)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error for Description\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "    pm.expect(response.errors).to.have.property('Description');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Test Event\",\n  \"description\": \"Short\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event with description less than 10 characters. Should return 400."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Create Event - Past DateTime",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error for EventDateTime\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "    pm.expect(response.errors).to.have.property('EventDateTime');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Past Event\",\n  \"description\": \"This event has a date in the past which should be invalid.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2020-01-01T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event with past datetime. Should return 400 with validation error."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Create Event - Invalid Attendance Range",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Invalid Attendance Event\",\n  \"description\": \"This event has maxAttendance less than minAttendance.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 20,\n  \"maxAttendance\": 5,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event where maxAttendance < minAttendance. Should return 400."
+      },
+      "response": []
+    },
+    {
+      "name": "8. Create Event - Invalid Age Range",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Response contains validation error\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('errors');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Invalid Age Range Event\",\n  \"description\": \"This event has maxAge less than minAge which is invalid.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 1,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 30,\n  \"maxAge\": 18,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event where maxAge < minAge. Should return 400."
+      },
+      "response": []
+    },
+    {
+      "name": "9. Create Event - Invalid Category",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 404 Not Found or 400 Bad Request\", function () {",
+              "    pm.expect([400, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "pm.test(\"Response contains error about category\", function () {",
+              "    const response = pm.response.json();",
+              "    const responseText = JSON.stringify(response).toLowerCase();",
+              "    pm.expect(responseText).to.include('category');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Invalid Category Event\",\n  \"description\": \"This event has a categoryId that doesn't exist in the database.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"2026-12-31T18:00:00Z\",\n  \"categoryId\": 9999,\n  \"minAttendance\": 5,\n  \"maxAttendance\": 20,\n  \"minAge\": 18,\n  \"maxAge\": 99,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Attempts to create event with non-existent categoryId. Should return 404 or 400."
+      },
+      "response": []
+    },
+    {
+      "name": "10. Create Event - Minimal Valid Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test(\"Response has eventId\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventId');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const tomorrow = new Date();",
+              "tomorrow.setDate(tomorrow.getDate() + 1);",
+              "tomorrow.setHours(20, 0, 0, 0);",
+              "pm.variables.set('eventDateTime', tomorrow.toISOString());"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Minimal Event\",\n  \"description\": \"This event uses minimum valid values for all fields to test edge cases.\",\n  \"location\": \"Stockholm\",\n  \"eventDateTime\": \"{{eventDateTime}}\",\n  \"categoryId\": 1,\n  \"minAttendance\": 1,\n  \"maxAttendance\": 1,\n  \"minAge\": 13,\n  \"maxAge\": 13,\n  \"genderRestriction\": 0\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events"]
+        },
+        "description": "Creates event with minimal valid values to test lower boundaries."
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// This script runs before every request in this collection",
+          "// You can add collection-level pre-request logic here"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// This script runs after every request in this collection",
+          "// You can add collection-level test logic here"
+        ]
+      }
+    }
+  ]
+}

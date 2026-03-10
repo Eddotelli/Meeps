@@ -1,0 +1,71 @@
+name: API Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      ASPNETCORE_ENVIRONMENT: Testing
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Newman
+        run: npm install -g newman newman-reporter-htmlextra
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build API
+        run: dotnet build --no-restore --configuration Release
+        working-directory: ./API
+
+      - name: Start API in background
+        run: |
+          cd API
+          dotnet run --no-build --configuration Release --environment Testing &
+          echo "Waiting for API to start..."
+          sleep 15
+
+      - name: Health check
+        run: |
+          curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:5000/api/health
+          echo "API is healthy!"
+
+      - name: Run Postman/Newman tests
+        run: |
+          newman run Tests/Postman/meeps-api.postman_collection.json \
+            -e Tests/Postman/meeps-testing.postman_environment.json \
+            -r cli,htmlextra \
+            --reporter-htmlextra-export newman-report.html \
+            --bail \
+            --color on
+
+      - name: Upload Newman Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: newman-report.html
+
+      - name: Stop API
+        if: always()
+        run: pkill -f "dotnet.*API"

@@ -1,0 +1,289 @@
+@using Microsoft.JSInterop
+@using Client.Services
+@inject II18nService I18n
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject ILogger<MapView> Logger
+@implements IAsyncDisposable
+
+<MudPaper Elevation="1" Class="@Class">
+    @if (!string.IsNullOrEmpty(Title))
+    {
+        <MudText Typo="Typo.body2" Class="pa-2">
+            @Title
+        </MudText>
+    }
+
+
+    <div class="map-container @Height">
+        @if (_isLoading)
+        {
+            <div class="leaflet-map-container map-overlay @Height d-flex align-center justify-center">
+                <Spinner IsLoading="true" LoadingText="@I18n.GetCommon("loadingMap")" Size="Size.Medium"
+                    Color="Color.Primary" />
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(_errorCode))
+        {
+            <div class="leaflet-map-container map-overlay @Height d-flex align-center justify-center pa-4">
+                <MudAlert Severity="Severity.Warning">@I18n.GetError(_errorCode)</MudAlert>
+            </div>
+        }
+
+        <div id="@_mapId" class="leaflet-map-container @Height"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public double Latitude { get; set; }
+    [Parameter] public double Longitude { get; set; }
+    [Parameter] public int ZoomLevel { get; set; } = 13;
+    [Parameter] public string Height { get; set; } = "map-md";
+    [Parameter] public bool ShowMarker { get; set; } = true;
+    [Parameter] public double? RadiusKm { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public List<EventMarkerDto>? Events { get; set; }
+    [Parameter] public EventCallback OnEventNavigation { get; set; }
+
+    private string _mapId = Guid.NewGuid().ToString();
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<MapView>? _dotNetRef;
+    private bool _isInitialized;
+    private bool _isLoading = true;
+    private string? _errorCode;
+
+    private double _lastLatitude;
+    private double _lastLongitude;
+    private int _lastZoomLevel;
+    private bool _lastShowMarker;
+    private double? _lastRadiusKm;
+    private List<EventMarkerDto>? _lastEvents;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_isInitialized)
+        {
+            I18n.OnLanguageChanged += StateHasChanged;
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await InitializeMapAsync();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_isInitialized) return;
+
+        bool locationChanged = _lastLatitude != Latitude || _lastLongitude != Longitude;
+        bool zoomChanged = _lastZoomLevel != ZoomLevel;
+        bool markerChanged = _lastShowMarker != ShowMarker;
+        bool radiusChanged = _lastRadiusKm != RadiusKm;
+        bool eventsChanged = !EventsEqual(_lastEvents, Events);
+
+        // If only radius changed, update just the circle to preserve user's zoom
+        if (radiusChanged && !locationChanged && !zoomChanged && !markerChanged && !eventsChanged)
+        {
+            await UpdateRadiusOnlyAsync();
+        }
+        else if (locationChanged || zoomChanged || markerChanged || radiusChanged)
+        {
+            await UpdateMapAsync();
+        }
+
+        // Update event markers if events changed
+        if (eventsChanged)
+        {
+            await UpdateEventMarkersAsync();
+        }
+    }
+
+    private async Task InitializeMapAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _errorCode = null;
+            StateHasChanged();
+
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./javascript/mapview.js");
+
+            var result = await _module.InvokeAsync<MapResult>(
+            "initializeMap", _mapId, Latitude, Longitude, ZoomLevel, ShowMarker, RadiusKm);
+
+            if (result.Success)
+            {
+                _isInitialized = true;
+                _lastLatitude = Latitude;
+                _lastLongitude = Longitude;
+                _lastZoomLevel = ZoomLevel;
+                _lastShowMarker = ShowMarker;
+                _lastRadiusKm = RadiusKm;
+
+                // Initialize event markers if events are provided
+                if (Events != null && Events.Any())
+                {
+                    await UpdateEventMarkersAsync();
+                }
+            }
+            else
+            {
+                _errorCode = "MAP.INIT_FAILED";
+                Logger.LogError("Failed to initialize map: {Error}", result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorCode = "MAP.INIT_FAILED";
+            Logger.LogError(ex, "Error initializing map");
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateMapAsync()
+    {
+        if (_module == null || !_isInitialized) return;
+
+        try
+        {
+            var result = await _module.InvokeAsync<MapResult>(
+            "updateMap", _mapId, Latitude, Longitude, ZoomLevel, ShowMarker, RadiusKm);
+
+            if (result.Success)
+            {
+                _lastLatitude = Latitude;
+                _lastLongitude = Longitude;
+                _lastZoomLevel = ZoomLevel;
+                _lastShowMarker = ShowMarker;
+                _lastRadiusKm = RadiusKm;
+            }
+            else
+            {
+                Logger.LogWarning("Failed to update map: {Error}", result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating map");
+        }
+    }
+
+    private async Task UpdateRadiusOnlyAsync()
+    {
+        if (_module == null || !_isInitialized) return;
+
+        try
+        {
+            var result = await _module.InvokeAsync<MapResult>(
+            "updateRadius", _mapId, Latitude, Longitude, RadiusKm);
+
+            if (result.Success)
+            {
+                _lastRadiusKm = RadiusKm;
+            }
+            else
+            {
+                Logger.LogWarning("Failed to update radius: {Error}", result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating radius");
+        }
+    }
+
+    private async Task UpdateEventMarkersAsync()
+    {
+        if (_module == null || !_isInitialized) return;
+
+        try
+        {
+            var eventsList = Events ?? new List<EventMarkerDto>();
+
+            var result = await _module.InvokeAsync<MapResult>(
+            "updateEventMarkers", _mapId, Latitude, Longitude, eventsList, _dotNetRef);
+
+            if (result.Success)
+            {
+                _lastEvents = Events?.ToList();
+            }
+            else
+            {
+                Logger.LogWarning("Failed to update event markers: {Error}", result.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating event markers");
+        }
+    }
+
+    [JSInvokable]
+    public async Task NavigateToEvent(string eventHash)
+    {
+        if (!string.IsNullOrEmpty(eventHash))
+        {
+            await OnEventNavigation.InvokeAsync();
+            Navigation.NavigateTo($"/events/{eventHash}");
+        }
+    }
+
+    private bool EventsEqual(List<EventMarkerDto>? list1, List<EventMarkerDto>? list2)
+    {
+        if (list1 == null && list2 == null) return true;
+        if (list1 == null || list2 == null) return false;
+        if (list1.Count != list2.Count) return false;
+
+        for (int i = 0; i < list1.Count; i++)
+        {
+            if (list1[i].EventId != list2[i].EventId)
+                return false;
+        }
+
+        return true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+
+        if (_module != null)
+        {
+            try
+            {
+                await _module.InvokeAsync<MapResult>("disposeMap", _mapId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Ignore - circuit disconnected
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error disposing map");
+            }
+        }
+
+        _dotNetRef?.Dispose();
+    }
+
+    private class MapResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+    }
+
+    public class EventMarkerDto
+    {
+        public int EventId { get; set; }
+        public string EventHash { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+        public double? DistanceKm { get; set; }
+    }
+}

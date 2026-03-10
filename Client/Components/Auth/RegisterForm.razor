@@ -1,0 +1,33 @@
+@using Shared.Contracts.Auth
+@using Client.Services
+@inject II18nService I18n
+
+<EditForm Model="@RegisterRequest" OnValidSubmit="@HandleSubmit">
+    <LocalizedDataAnnotationsValidator />
+
+    <MudTextField @bind-Value="RegisterRequest.Email" For="@(() => RegisterRequest.Email)"
+        Label="@I18n.GetCommon("email")" Variant="Variant.Outlined" InputType="InputType.Email" Immediate="true"
+        Required="true" Class="mb-3" HelperText="@I18n.GetHelpText("email")" />
+
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+        Disabled="@IsLoading" Class="mt-3 rounded-pill">
+        <Spinner IsLoading="@IsLoading" LoadingText="@I18n.GetCommon("sending")"
+            DefaultText="@I18n.GetCommon("register")" />
+    </MudButton>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired]
+    public RegisterRequest RegisterRequest { get; set; } = new();
+
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    [Parameter]
+    public EventCallback<RegisterRequest> OnSubmit { get; set; }
+
+    private async Task HandleSubmit()
+    {
+        await OnSubmit.InvokeAsync(RegisterRequest);
+    }
+}

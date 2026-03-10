@@ -1,0 +1,73 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@implements IDisposable
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <NotAuthorized>
+                    @{
+                        // Router-level guard: Redirect to login without flash/blink
+                        Navigation.NavigateTo("/login", replace: true);
+                    }
+                </NotAuthorized>
+                <Authorizing>
+                    <div class="auth-loader">
+                        <MudProgressCircular Size="Size.Large" Indeterminate="true" />
+                    </div>
+                </Authorizing>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>Sidan hittades inte</PageTitle>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <p role="alert">Sidan hittades inte.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        // Check on initial load
+        await CheckAndRedirectAuthPages();
+
+        // Router-level guard: Prevent authenticated users from accessing auth pages (stops flash/blink)
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        try
+        {
+            await CheckAndRedirectAuthPages();
+        }
+        catch
+        {
+            // Silently handle - navigation errors are non-critical
+        }
+    }
+
+    private async Task CheckAndRedirectAuthPages()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var isAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+
+        var currentPath = new Uri(Navigation.Uri).AbsolutePath.ToLower();
+        var authPages = new[] { "/login", "/register", "/complete-registration" };
+
+        if (isAuthenticated && authPages.Contains(currentPath))
+        {
+            Navigation.NavigateTo("/", replace: true);
+        }
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

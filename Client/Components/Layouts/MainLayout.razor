@@ -1,0 +1,85 @@
+@inherits LayoutComponentBase
+@using Client.Components.Common
+@using Client.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+
+<MudThemeProvider Theme="@AppTheme.Theme" @bind-IsDarkMode="@_isDarkMode" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+
+<MudLayout>
+    <NavBar OnDrawerToggle="@ToggleDrawer" IsDarkMode="@_isDarkMode" OnDarkModeToggle="@ToggleDarkMode" />
+
+    @if (_isAuthenticated)
+    {
+        <MudDrawer @bind-Open="@_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="0">
+            <MudNavMenu>
+                <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">
+                    @I18n.GetCommon("home")
+                </MudNavLink>
+                <MudNavLink Href="/events/create" Icon="@Icons.Material.Filled.Add">
+                    @I18n.GetCommon("createEvent")
+                </MudNavLink>
+                <MudNavLink Href="/events/my-events" Icon="@Icons.Material.Filled.Event">
+                    @I18n.GetCommon("myEvents")
+                </MudNavLink>
+            </MudNavMenu>
+        </MudDrawer>
+    }
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Large">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    [Inject] private II18nService I18n { get; set; } = default!;
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private bool _drawerOpen = false;
+    private bool _isAuthenticated = false;
+    private bool _isDarkMode = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isAuthenticated = user.Identity?.IsAuthenticated ?? false;
+
+        I18n.OnLanguageChanged += StateHasChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        _drawerOpen = false;
+        StateHasChanged();
+    }
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    private void ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+    }
+
+    private void NavigateToCreateEvent()
+    {
+        Navigation.NavigateTo("/events/create");
+        _drawerOpen = false;
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

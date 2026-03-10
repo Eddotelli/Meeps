@@ -1,0 +1,305 @@
+{
+  "info": {
+    "_postman_id": "get-nearby-events-tests",
+    "name": "Get Nearby Events Tests",
+    "description": "Test collection for GET /api/events/nearby endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Nearby Events - Success",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response is an array\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.be.an('array');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=59.3293&longitude=18.0686&radiusKm=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Nearby Events - Invalid Latitude",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions latitude\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('latitude');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=100&longitude=18.0686&radiusKm=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "100"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Nearby Events - Invalid Longitude",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions longitude\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('longitude');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=59.3293&longitude=200&radiusKm=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "200"
+            },
+            {
+              "key": "radiusKm",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Nearby Events - Invalid Radius (Zero)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions radius\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('radius');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=59.3293&longitude=18.0686&radiusKm=0",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "0"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Nearby Events - Invalid Radius (Too Large)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test(\"Error message mentions radius\", function () {",
+              "    const response = pm.response.text();",
+              "    pm.expect(response.toLowerCase()).to.include('radius');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=59.3293&longitude=18.0686&radiusKm=150",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "150"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Nearby Events - Unauthorized",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 401\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/nearby?latitude=59.3293&longitude=18.0686&radiusKm=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "nearby"],
+          "query": [
+            {
+              "key": "latitude",
+              "value": "59.3293"
+            },
+            {
+              "key": "longitude",
+              "value": "18.0686"
+            },
+            {
+              "key": "radiusKm",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@using Client.Services
+@using Client.Components.Common
+
+<MudThemeProvider Theme="@AppTheme.Theme" @bind-IsDarkMode="@_isDarkMode" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+
+<div class="auth-split-screen">
+    <div class="auth-image">
+        <div class="auth-image-overlay"></div>
+    </div>
+    <div class="auth-form">
+        <div class="auth-language-selector">
+            <LanguageSelector />
+        </div>
+        <div class="auth-logo-header">
+            <MudImage Src="assets/logo8wh.png" Alt="Meeps" Class="auth-logo" />
+        </div>
+        <div class="auth-form-wrapper">
+            <div class="auth-form-content">
+                @Body
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool _isDarkMode = false;
+}

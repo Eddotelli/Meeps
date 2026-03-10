@@ -1,0 +1,232 @@
+{
+  "info": {
+    "name": "Events - Join Event",
+    "description": "Tests for JoinEvent endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Join Event - Success",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has eventId\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('eventId');",
+              "    pm.expect(response.eventId).to.equal(pm.environment.get('testEventId'));",
+              "});",
+              "",
+              "pm.test(\"Response has joinedAt timestamp\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('joinedAt');",
+              "});",
+              "",
+              "pm.test(\"Response has message\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('message');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}/join",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}", "join"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Join Event - Unauthorized",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 401 Unauthorized\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events/1/join",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "1", "join"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Join Event - Already Participant",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 409 Conflict\", function () {",
+              "    pm.response.to.have.status(409);",
+              "});",
+              "",
+              "pm.test(\"Response contains error code\", function () {",
+              "    const response = pm.response.json();",
+              "    pm.expect(response).to.have.property('code');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Note: Run 'Join Event - Success' test first to become a participant"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}/join",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}", "join"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Join Event - Non-Existent Event",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/events/99999/join",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "99999", "join"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. Join Event - Verify Attendance Increased",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"CurrentAttendance increased\", function () {",
+              "    const response = pm.response.json();",
+              "    const previousAttendance = pm.environment.get('previousAttendance') || 0;",
+              "    pm.expect(response.currentAttendance).to.be.greaterThan(previousAttendance);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Get current attendance before joining",
+              "pm.sendRequest({",
+              "    url: pm.environment.get('baseUrl') + '/api/events/' + pm.environment.get('testEventId'),",
+              "    method: 'GET'",
+              "}, function (err, response) {",
+              "    if (!err) {",
+              "        const data = response.json();",
+              "        pm.environment.set('previousAttendance', data.currentAttendance);",
+              "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/events/{{testEventId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "events", "{{testEventId}}"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

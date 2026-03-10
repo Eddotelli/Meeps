@@ -1,0 +1,33 @@
+@using Client.Services
+@implements IDisposable
+@inject II18nService I18n
+
+<MudButtonGroup Variant="Variant.Text" Size="Size.Small" Class="language-selector" Color="Color.Primary">
+    <MudButton title="English" Color="@(I18n.CurrentCulture == "en-US" ? Color.Primary : Color.Default)"
+        Variant="@(I18n.CurrentCulture == "en-US" ? Variant.Filled : Variant.Text)" Size="Size.Small"
+        Class="language-btn" OnClick="@(() => HandleLanguageChange("en-US"))">
+        🇬🇧
+    </MudButton>
+    <MudButton title="Svenska" Color="@(I18n.CurrentCulture == "sv-SE" ? Color.Primary : Color.Default)"
+        Variant="@(I18n.CurrentCulture == "sv-SE" ? Variant.Filled : Variant.Text)" Size="Size.Small"
+        Class="language-btn" OnClick="@(() => HandleLanguageChange("sv-SE"))">
+        🇸🇪
+    </MudButton>
+</MudButtonGroup>
+
+@code {
+    private async Task HandleLanguageChange(string culture)
+    {
+        await I18n.SetCultureAsync(culture);
+    }
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

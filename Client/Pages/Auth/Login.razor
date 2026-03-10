@@ -1,0 +1,94 @@
+@page "/login"
+@layout AuthLayout
+@using Shared.Contracts.Auth
+@using Shared.Common.Constants
+@using Client.Components.Auth
+@using Client.Components.Common
+@using Client.Services.ApiClients
+@using Client.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+@inject IAuthApiClient AuthApiClient
+@inject NavigationManager Navigation
+@inject II18nService I18n
+@inject ILogger<Login> Logger
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>@I18n.GetCommon("login")</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-4">
+    <MudCard Elevation="0" Class="modern-section-card">
+        <MudCardContent>
+            <div class="modern-section-header">
+                <div class="section-title-wrapper">
+                    <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("login")</MudText>
+                    <div class="title-accent"></div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorCode))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@I18n.GetError(errorCode)</MudAlert>
+            }
+
+            <LoginForm LoginRequest="@loginRequest" IsLoading="@isLoading" OnSubmit="@HandleLogin" />
+
+            <MudDivider Class="my-4" />
+
+            <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                <MudLink Href="/forgot-password" Typo="Typo.body2" Color="Color.Primary">
+                    @I18n.GetCommon("forgotPassword")
+                </MudLink>
+                <MudText Typo="Typo.body2" Align="Align.Center">
+                    @I18n.GetCommon("dontHaveAccount")
+                    <MudLink Href="/register" Color="Color.Primary">@I18n.GetCommon("registerHere")</MudLink>
+                </MudText>
+            </MudStack>
+        </MudCardContent>
+    </MudCard>
+</MudContainer>
+
+@code {
+    private LoginRequest loginRequest = new();
+    private string? errorCode;
+    private bool isLoading = false;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+
+    private async Task HandleLogin(LoginRequest request)
+    {
+        isLoading = true;
+        errorCode = null;
+
+        Logger.LogInformation("User attempting to login with email: {Email}", loginRequest.Email);
+
+        var result = await AuthApiClient.LoginAsync(loginRequest);
+
+        if (result.IsFailure)
+        {
+            Logger.LogWarning("Login failed for email: {Email}. Error: {ErrorCode}", loginRequest.Email, result.Error?.Code);
+            errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            isLoading = false;
+            return;
+        }
+
+        Logger.LogInformation("Login successful for email: {Email}", loginRequest.Email);
+
+        // Notify authentication state changed
+        if (AuthStateProvider is CustomAuthenticationStateProvider customProvider)
+        {
+            customProvider.NotifyAuthenticationStateChanged();
+        }
+
+        // Login successful, navigate to home
+        Navigation.NavigateTo("/", replace: true);
+    }
+}

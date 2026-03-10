@@ -1,0 +1,547 @@
+@page "/profile"
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Shared.Common.Constants
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Profile
+@using Client.Components.Common
+@using Client.Helpers
+@using Shared.Contracts.Users
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject II18nService I18n
+@inject IUsersApiClient UsersApi
+@inject ISnackbar Snackbar
+
+<PageTitle>@I18n.GetCommon("myProfile")</PageTitle>
+
+@if (_isLoading)
+{
+    <div class="d-flex justify-center align-center loading-container-lg">
+        <Spinner />
+    </div>
+}
+else if (_profile != null)
+{
+    <MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+        <div class="page-title-wrapper">
+            <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon(_isEditing ? "editProfile" : "profile")</MudText>
+        </div>
+
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+            OnClick="@(() => Navigation.NavigateTo("/"))" Class="mb-3">
+            @I18n.GetCommon("back")
+        </MudButton>
+
+        @if (!string.IsNullOrEmpty(_errorCode))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                @I18n.GetError(_errorCode)
+            </MudAlert>
+        }
+
+        <MudCard Elevation="0">
+            @if (!_isEditing)
+            {
+                @* View Mode - Modern Layout with Image on Left *@
+                <MudCardContent>
+                    <MudGrid>
+                        <MudItem xs="12" md="4" Class="d-flex flex-column align-center">
+                            <div class="profile-image-wrapper">
+                                <div class="profile-image-container-large">
+                                    <ProfileImage ProfileImageUrl="@_profile.ProfileImageUrl"
+                                        DisplayName="@_profile.DisplayName" />
+
+                                    @* Profile Badges - Bottom of Circle *@
+                                    <ProfileBadges IsVerified="@_profile.IsVerified"
+                                                  Gender="@_profile.Gender"
+                                                  BirthDate="@_profile.BirthDate"
+                                                  IsBlocked="false"
+                                                  ShowBlocked="false"
+                                                  Size="ProfileBadges.BadgeSize.Small"
+                                                  ContainerClass="profile-badges-bottom" />
+                                </div>
+                            </div>
+                        </MudItem>
+
+                        <MudItem xs="12" md="8">
+                            <div class="d-flex justify-space-between align-center mb-3">
+                                <div class="profile-title-wrapper">
+                                    <MudText Typo="Typo.h3" Class="profile-title">@_profile.DisplayName</MudText>
+                                    <div class="title-accent"></div>
+                                </div>
+                                @* Desktop - knapp med både ikon och text *@
+                                <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                        StartIcon="@Icons.Material.Filled.Edit" OnClick="EnterEditMode" Size="Size.Large">
+                                        @I18n.GetCommon("edit")
+                                    </MudButton>
+                                </MudHidden>
+
+                                @* Mobil - endast ikon *@
+                                <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" 
+                                                   Color="Color.Primary"
+                                                   Variant="Variant.Filled"
+                                                   Size="Size.Large"
+                                                   OnClick="EnterEditMode"
+                                                   aria-label="@I18n.GetCommon("edit")" />
+                                </MudHidden>
+                            </div>
+
+                            @* <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mb-4">
+                                <MudIcon Icon="@Icons.Material.Filled.Email" Size="Size.Small" Class="me-2" />
+                                @_profile.Email
+                            </MudText> *@
+
+                            @if (!string.IsNullOrEmpty(_profile.Bio))
+                            {
+                                <MudPaper Class="profile-bio-section mb-4" Elevation="0">
+                                    <MudText Typo="Typo.body1">
+                                        @_profile.Bio
+                                    </MudText>
+                                </MudPaper>
+                            }
+
+                            <MudDivider Class="mb-4" />
+
+                            <MudText Typo="Typo.h6" Class="mb-3">@I18n.GetCommon("personalInfo")</MudText>
+                            <MudStack Spacing="3" Class="mb-4">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                    <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Medium" Color="Color.Primary" />
+                                    <div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("age")</MudText>
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                            <MudText Typo="Typo.body1">@(ProfileBadgeHelper.GetAgeText(_profile.BirthDate, I18n.GetCommon("years")))</MudText>
+                                            @if (!_profile.IsVerified)
+                                            {
+                                                <MudTooltip Text="@I18n.GetHelpText("verifyIdentity")">
+                                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                                        StartIcon="@(_isVerifying ? null : Icons.Material.Filled.Shield)"
+                                                        OnClick="VerifyUser" Disabled="_isVerifying">
+                                                        <Spinner IsLoading="@_isVerifying"
+                                                            LoadingText="@I18n.GetCommon("verifying")"
+                                                            DefaultText="@I18n.GetCommon("verify")" Size="Size.Small" />
+                                                    </MudButton>
+                                                </MudTooltip>
+                                            }
+                                        </MudStack>
+                                    </div>
+                                </MudStack>
+
+                                @if (_profile.Gender.HasValue)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Medium" Color="Color.Primary" />
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("gender")</MudText>
+                                            <MudText Typo="Typo.body1">@I18n.GetCommon(_profile.Gender.Value.GetLocalizationKey())</MudText>
+                                        </div>
+                                    </MudStack>
+                                }
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                    <MudIcon Icon="@Icons.Material.Filled.CalendarToday" Size="Size.Medium"
+                                        Color="Color.Primary" />
+                                    <div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@I18n.GetCommon("memberSince")
+                                        </MudText>
+                                        <MudText Typo="Typo.body1">@_profile.CreatedAt.ToString("dd MMM yyyy")</MudText>
+                                    </div>
+                                </MudStack>
+                            </MudStack>
+                        </MudItem>
+                    </MudGrid>
+                </MudCardContent>
+            }
+            else
+            {
+                @* Edit Mode - Matching View Mode Layout *@
+                <MudCardContent>
+                    <EditForm Model="_editModel" OnValidSubmit="SaveProfile">
+                        <LocalizedDataAnnotationsValidator />
+
+                        @* Show constraint warnings *@
+                        @if (_editConstraints != null && (_editConstraints.Warnings.Any() || _editConstraints.GenderConflictingEvents.Any() || _editConstraints.AgeConflictingEvents.Any()))
+                        {
+                            <MudAlert Severity="Severity.Info" Class="mb-3">
+                                <MudText Typo="Typo.body2" Class="mb-2">
+                                    <strong>@I18n.GetMessage("profileEditConstraintsInfo")</strong>
+                                </MudText>
+                                @if (!_editConstraints.CanChangeGender && _editConstraints.GenderConflictingEvents.Any())
+                                {
+                                    <MudText Typo="Typo.body2" Class="mb-2">
+                                        @I18n.GetError(ErrorCodes.UserGenderConflictWithEvents)
+                                    </MudText>
+                                    <ul style="margin: 5px 0; padding-left: 20px;">
+                                        @foreach (var evt in _editConstraints.GenderConflictingEvents.Take(3))
+                                        {
+                                            <li style="font-size: 0.875rem;">
+                                                <strong>@evt.Title</strong> - @(evt.GenderRestriction.HasValue ? I18n.GetCommon(evt.GenderRestriction.Value.GetLocalizationKey()) : "")
+                                            </li>
+                                        }
+                                        @if (_editConstraints.GenderConflictingEvents.Count > 3)
+                                        {
+                                            <li style="font-size: 0.875rem;">... @(string.Format(I18n.GetCommon("andMoreEvents"), _editConstraints.GenderConflictingEvents.Count - 3))</li>
+                                        }
+                                    </ul>
+                                }
+                                @if (!_editConstraints.CanChangeBirthDate && _editConstraints.AgeConflictingEvents.Any())
+                                {
+                                    <MudText Typo="Typo.body2" Class="mb-2 mt-2">
+                                        @I18n.GetError(ErrorCodes.UserAgeConflictWithEvents)
+                                    </MudText>
+                                    <ul style="margin: 5px 0; padding-left: 20px;">
+                                        @foreach (var evt in _editConstraints.AgeConflictingEvents.Take(3))
+                                        {
+                                            <li style="font-size: 0.875rem;">
+                                                <strong>@evt.Title</strong>
+                                                @if (evt.MinAge.HasValue || evt.MaxAge.HasValue)
+                                                {
+                                                    <text> - @I18n.GetCommon("age"): </text>
+                                                    @if (evt.MinAge.HasValue && evt.MaxAge.HasValue)
+                                                    {
+                                                        <text>@evt.MinAge-@evt.MaxAge</text>
+                                                    }
+                                                    else if (evt.MinAge.HasValue)
+                                                    {
+                                                        <text>@evt.MinAge+</text>
+                                                    }
+                                                    else if (evt.MaxAge.HasValue)
+                                                    {
+                                                        <text>@I18n.GetCommon("upTo") @evt.MaxAge</text>
+                                                    }
+                                                }
+                                            </li>
+                                        }
+                                        @if (_editConstraints.AgeConflictingEvents.Count > 3)
+                                        {
+                                            <li style="font-size: 0.875rem;">... @(string.Format(I18n.GetCommon("andMoreEvents"), _editConstraints.AgeConflictingEvents.Count - 3))</li>
+                                        }
+                                    </ul>
+                                }
+                            </MudAlert>
+                        }
+
+                        <MudGrid>
+                            <MudItem xs="12" md="4" Class="d-flex flex-column align-center">
+                                <div class="profile-image-wrapper">
+                                    <ImageUploadGenerator Context="Profile" InitialImageUrl="@_profile.ProfileImageUrl"
+                                        OnImageChanged="HandleProfileImageChanged"
+                                        OnBase64ImageGenerated="HandleBase64ImageGenerated" />
+                                </div>
+                            </MudItem>
+
+                            <MudItem xs="12" md="8">
+                                @* Display Name Field with Icon *@
+                                <MudStack Spacing="3" Class="mb-4">
+                                    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Medium" Color="Color.Primary"
+                                            Class="mt-3" />
+                                        <div Class="flex-grow-1">
+                                            <MudTextField @bind-Value="_editModel!.DisplayName"
+                                                For="@(() => _editModel!.DisplayName)" Label="@I18n.GetCommon("displayName")"
+                                                Variant="Variant.Outlined" Immediate="true" Required="true"
+                                                HelperText="@I18n.GetHelpText("displayName")"
+                                                Error="@(!string.IsNullOrEmpty(_displayNameError))"
+                                                ErrorText="@_displayNameError" />
+                                        </div>
+                                    </MudStack>
+
+                                    @* Bio Field with Icon *@
+                                    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Medium"
+                                            Color="Color.Primary" Class="mt-3" />
+                                        <div Class="flex-grow-1">
+                                            <MudTextField @bind-Value="_editModel!.Bio" For="@(() => _editModel!.Bio)"
+                                                Label="@I18n.GetCommon("bio")" Variant="Variant.Outlined" Lines="4" />
+                                        </div>
+                                    </MudStack>
+                                </MudStack>
+
+                                <MudDivider Class="mb-4" />
+
+                                <MudText Typo="Typo.h6" Class="mb-3">@I18n.GetCommon("personalInfo")</MudText>
+                                <MudStack Spacing="3" Class="mb-4">
+                                    @* Gender Field with Icon *@
+                                    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Wc" Size="Size.Medium" Color="Color.Primary"
+                                            Class="mt-3" />
+                                        <div Class="flex-grow-1">
+                                            <MudSelect @bind-Value="_editModel!.Gender" For="@(() => _editModel!.Gender)"
+                                                Label="@I18n.GetCommon("gender")" Variant="Variant.Outlined" Clearable="true"
+                                                T="Gender ?" HelperText="@GetGenderHelperText()"
+                                                Disabled="@(!CanChangeGender())">
+                                                @foreach (var gender in GenderExtensions.GetAll())
+                                                {
+                                                    <MudSelectItem Value="@((Gender?)gender)">
+                                                        @I18n.GetCommon(gender.GetLocalizationKey())</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                        </div>
+                                    </MudStack>
+
+                                    @* Birth Date Field with Icon *@
+                                    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Cake" Size="Size.Medium" Color="Color.Primary"
+                                            Class="mt-3" />
+                                        <div Class="flex-grow-1">
+                                            <MudDatePicker @bind-Date="_editModel!.BirthDate"
+                                                For="@(() => _editModel!.BirthDate)" Label="@I18n.GetCommon("birthDate")"
+                                                Variant="Variant.Outlined" MaxDate="DateTime.Today.AddYears(-18)"
+                                                OpenTo="OpenTo.Year" DateFormat="yyyy-MM-dd" Editable="true"
+                                                HelperText="@GetBirthDateHelperText()"
+                                                Disabled="@(!CanChangeBirthDate())" />
+                                        </div>
+                                    </MudStack>
+                                </MudStack>
+
+                                <MudDivider Class="my-4" />
+
+                                <MudStack Row="true" Spacing="2">
+                                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Success"
+                                        StartIcon="@Icons.Material.Filled.Save" Size="Size.Large" Disabled="_isSaving">
+                                        <Spinner IsLoading="@_isSaving" LoadingText="@I18n.GetCommon("saving")"
+                                            DefaultText="@I18n.GetCommon("save")" />
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="CancelEdit"
+                                        Size="Size.Large" Disabled="_isSaving">
+                                        @I18n.GetCommon("cancel")
+                                    </MudButton>
+                                </MudStack>
+                            </MudItem>
+                        </MudGrid>
+                    </EditForm>
+                </MudCardContent>
+            }
+        </MudCard>
+    </MudContainer>
+}
+
+@code {
+    private GetUserProfileResponse? _profile;
+    private GetProfileEditConstraintsResponse? _editConstraints;
+    private UpdateProfileRequest? _editModel;
+    private bool _isLoading = true;
+    private bool _isEditing = false;
+    private bool _isSaving = false;
+    private bool _isVerifying = false;
+    private string? _errorCode;
+    private string? _displayNameError;
+    private string? _originalProfileImageUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        await LoadProfile();
+
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    private async Task LoadProfile()
+    {
+        _isLoading = true;
+        _errorCode = null;
+
+        var result = await UsersApi.GetUserProfileAsync();
+
+        if (result.IsSuccess)
+        {
+            _profile = result.Value;
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            // Set a default profile if null to avoid showing blank page
+            if (_profile == null)
+            {
+                _profile = new GetUserProfileResponse();
+            }
+        }
+
+        _isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task EnterEditMode()
+    {
+        if (_profile == null) return;
+
+        _isEditing = true;
+        _displayNameError = null;
+        _originalProfileImageUrl = _profile.ProfileImageUrl; // Spara original
+        _editModel = new UpdateProfileRequest
+        {
+            DisplayName = _profile.DisplayName,
+            Bio = _profile.Bio,
+            Gender = _profile.Gender,
+            BirthDate = _profile.BirthDate
+        };
+
+        // Load edit constraints to check what can be changed
+        await LoadEditConstraints();
+    }
+
+    private async Task LoadEditConstraints()
+    {
+        var result = await UsersApi.GetProfileEditConstraintsAsync();
+        
+        if (result.IsSuccess)
+        {
+            _editConstraints = result.Value;
+        }
+        else
+        {
+            // If constraints fail to load, assume everything is editable
+            _editConstraints = null;
+        }
+        
+        StateHasChanged();
+    }
+
+    private void CancelEdit()
+    {
+        _isEditing = false;
+        _editModel = null;
+        _editConstraints = null;
+
+        // Återställ ursprunglig profilbild om den ändrades
+        if (_profile != null && _originalProfileImageUrl != null)
+        {
+            _profile.ProfileImageUrl = _originalProfileImageUrl;
+        }
+        _originalProfileImageUrl = null;
+    }
+
+    private void HandleProfileImageChanged(string imageUrl)
+    {
+        if (_profile != null)
+        {
+            _profile.ProfileImageUrl = imageUrl;
+            StateHasChanged();
+        }
+    }
+
+    private void HandleBase64ImageGenerated(string base64Data)
+    {
+        if (_editModel != null)
+        {
+            _editModel.Base64Image = base64Data;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveProfile()
+    {
+        if (_editModel == null) return;
+
+        _isSaving = true;
+        _errorCode = null;
+        _displayNameError = null;
+        StateHasChanged();
+
+        var result = await UsersApi.UpdateProfileAsync(_editModel);
+
+        if (result.IsSuccess)
+        {
+            _profile = result.Value;
+            _isEditing = false;
+            _editModel = null;
+
+            // Notify authentication state has changed to update DisplayName in UI
+            if (AuthStateProvider is CustomAuthenticationStateProvider customAuthProvider)
+            {
+                customAuthProvider.NotifyAuthenticationStateChanged();
+            }
+
+            Snackbar.Add(I18n.GetMessage(MessageKeys.ProfileUpdated), Severity.Success);
+        }
+        else
+        {
+            var errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+
+            // Show error directly on DisplayName field if that's the issue
+            if (errorCode == ErrorCodes.UserDisplayNameExists)
+            {
+                _displayNameError = I18n.GetError(errorCode);
+            }
+            else
+            {
+                // Show general error alert for other errors (server errors, etc.)
+                _errorCode = errorCode;
+            }
+        }
+
+        _isSaving = false;
+        StateHasChanged();
+    }
+
+    private async Task VerifyUser()
+    {
+        _isVerifying = true;
+        _errorCode = null;
+        StateHasChanged();
+
+        var result = await UsersApi.VerifyUserAsync();
+
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(I18n.GetMessage(MessageKeys.VerificationComplete), Severity.Success);
+            await LoadProfile(); // Reload to get updated IsVerified status
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? ErrorCodes.VerificationFailed;
+        }
+
+        _isVerifying = false;
+        StateHasChanged();
+    }
+
+    // Badge logic moved to ProfileBadgeHelper
+
+    private bool CanChangeGender()
+    {
+        return _editConstraints?.CanChangeGender ?? true;
+    }
+
+    private bool CanChangeBirthDate()
+    {
+        return _editConstraints?.CanChangeBirthDate ?? true;
+    }
+
+    private string GetGenderHelperText()
+    {
+        if (!CanChangeGender() && _editConstraints?.GenderConflictingEvents.Any() == true)
+        {
+            return I18n.GetMessage("cannotChangeGenderDueToEvents");
+        }
+        return I18n.GetHelpText("gender");
+    }
+
+    private string GetBirthDateHelperText()
+    {
+        if (!CanChangeBirthDate() && _editConstraints?.AgeConflictingEvents.Any() == true)
+        {
+            return I18n.GetMessage("cannotChangeBirthDateDueToEvents");
+        }
+        return I18n.GetHelpText("birthDate");
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

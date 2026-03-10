@@ -1,0 +1,46 @@
+@page "/settings"
+@using Microsoft.AspNetCore.Components.Authorization
+@using Client.Services
+@using Client.Components.Settings
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject II18nService I18n
+
+<PageTitle>@I18n.GetCommon("settings")</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <div class="page-title-wrapper">
+        <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon("settings")</MudText>
+    </div>
+
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+        OnClick="@(() => Navigation.NavigateTo("/"))" Class="mb-3">
+        @I18n.GetCommon("back")
+    </MudButton>
+
+    <AccountSettings />
+</MudContainer>
+
+@code {
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            Navigation.NavigateTo("/login");
+        }
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

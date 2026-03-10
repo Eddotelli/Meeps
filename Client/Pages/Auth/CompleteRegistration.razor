@@ -1,0 +1,197 @@
+@page "/complete-registration"
+@layout AuthLayout
+@using Shared.Contracts.Auth
+@using Shared.Common.Constants
+@using Client.Components.Auth
+@using Client.Components.Common
+@using Client.Services.ApiClients
+@using Client.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+@inject IAuthApiClient AuthApiClient
+@inject NavigationManager Navigation
+@inject II18nService I18n
+@inject ILogger<CompleteRegistration> Logger
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>@I18n.GetCommon("completeRegistration")</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-4">
+    <MudCard Elevation="0" Class="modern-section-card">
+        <MudCardContent>
+            <div class="modern-section-header">
+                <div class="section-title-wrapper">
+                    <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("completeRegistration")</MudText>
+                    <div class="title-accent"></div>
+                </div>
+            </div>
+
+            @if (isLinkExpired)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mb-4">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.h6">@I18n.GetCommon("linkExpired")</MudText>
+                        <MudText Typo="Typo.body2">@I18n.GetMessage("registrationLinkExpired")</MudText>
+                        <MudButton Variant="Variant.Text" Color="Color.Inherit" Href="/register"
+                            StartIcon="@Icons.Material.Filled.PersonAdd">
+                            @I18n.GetCommon("registerAgain")
+                        </MudButton>
+                    </MudStack>
+                </MudAlert>
+            }
+            else if (isVerifying)
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-4">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                        <MudText>@I18n.GetCommon("verifyingLink")</MudText>
+                    </MudStack>
+                </MudAlert>
+            }
+            else if (isVerified && !string.IsNullOrEmpty(completeRegistrationRequest.VerificationToken))
+            {
+                @if (!string.IsNullOrEmpty(errorCode))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4">@I18n.GetError(errorCode)</MudAlert>
+                }
+
+                <MudAlert Severity="Severity.Info" Variant="Variant.Text" Class="mb-3">
+                    @I18n.GetMessage("fillDetailsToComplete")
+                </MudAlert>
+
+                <CompleteRegistrationForm CompleteRegistrationRequest="@completeRegistrationRequest" IsLoading="@isLoading"
+                    OnSubmit="@HandleCompleteRegistration" />
+            }
+            else
+            {
+                @if (!string.IsNullOrEmpty(errorCode))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4">@I18n.GetError(errorCode)</MudAlert>
+                }
+            }
+        </MudCardContent>
+    </MudCard>
+</MudContainer>
+
+@code {
+    private CompleteRegistrationRequest completeRegistrationRequest = new();
+    private string? errorCode;
+    private bool isLoading = false;
+    private bool isVerifying = true;
+    private bool isVerified = false;
+    private bool isLinkExpired = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+
+        var uri = new Uri(Navigation.Uri);
+        var query = uri.Query;
+
+        if (!string.IsNullOrEmpty(query) && query.StartsWith("?"))
+        {
+            var queryString = query.Substring(1);
+            var queryParams = System.Web.HttpUtility.ParseQueryString(queryString);
+            var tokenValue = queryParams["token"];
+
+            if (!string.IsNullOrEmpty(tokenValue))
+            {
+                completeRegistrationRequest.VerificationToken = tokenValue;
+                await VerifyEmail();
+            }
+            else
+            {
+                errorCode = ErrorCodes.EmailInvalidLink;
+                isVerified = false;
+                isVerifying = false;
+            }
+        }
+        else
+        {
+            errorCode = ErrorCodes.EmailInvalidLink;
+            isVerified = false;
+            isVerifying = false;
+        }
+    }
+
+    private async Task VerifyEmail()
+    {
+        isVerifying = true;
+        Logger.LogInformation("Verifying email with token");
+
+        var request = new VerifyEmailRequest(completeRegistrationRequest.VerificationToken);
+        var result = await AuthApiClient.VerifyEmailAsync(request);
+
+        if (result.IsFailure)
+        {
+            var localErrorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+
+            if (localErrorCode == ErrorCodes.EmailAlreadyVerified)
+            {
+                Logger.LogInformation("Email already verified, allowing user to continue");
+                isVerified = true;
+            }
+            else if (localErrorCode == ErrorCodes.EmailInvalidToken || result.Error?.StatusCode == 404)
+            {
+                Logger.LogWarning("Invalid or expired token");
+                errorCode = ErrorCodes.EmailInvalidToken;
+                isLinkExpired = true;
+            }
+            else
+            {
+                Logger.LogWarning("Email verification failed: {ErrorCode}", localErrorCode);
+                errorCode = localErrorCode;
+            }
+        }
+        else
+        {
+            Logger.LogInformation("Email verified successfully");
+            isVerified = true;
+        }
+
+        isVerifying = false;
+    }
+
+    private async Task HandleCompleteRegistration(CompleteRegistrationRequest request)
+    {
+        isLoading = true;
+        errorCode = null;
+
+        Logger.LogInformation("User attempting to complete registration");
+
+        var result = await AuthApiClient.CompleteRegistrationAsync(completeRegistrationRequest);
+
+        if (result.IsFailure)
+        {
+            var localErrorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            Logger.LogWarning("Registration completion failed: {ErrorCode}", localErrorCode);
+
+            if (localErrorCode.Contains("TOKEN") || localErrorCode.Contains("EXPIRED"))
+            {
+                isLinkExpired = true;
+                errorCode = null;
+            }
+            else
+            {
+                errorCode = localErrorCode;
+            }
+            isLoading = false;
+            return;
+        }
+
+        Logger.LogInformation("Registration completed successfully");
+
+        // Notify authentication state changed
+        if (AuthStateProvider is CustomAuthenticationStateProvider customProvider)
+        {
+            customProvider.NotifyAuthenticationStateChanged();
+        }
+
+        Navigation.NavigateTo("/", replace: true);
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

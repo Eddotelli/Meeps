@@ -1,0 +1,229 @@
+@using Client.Services
+@using Client.Services.ApiClients
+@using Shared.Contracts.Locations
+@inject II18nService I18n
+@inject ILocationsApiClient LocationsApi
+
+<MudStack Spacing="2" Class="@Class">
+    <MudTextField @bind-Value="_displayValue" @ref="_textFieldRef" Label="@GetLabel()" Variant="Variant.Outlined"
+        HelperText="@(_selectedLocation != null ? "" : I18n.GetHelpText("addressSearch"))"
+        Disabled="@(Disabled || _isSearching)" Immediate="true" @onkeydown="HandleKeyDown" @onfocus="SelectAllText"
+        Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PerformSearch"
+        AdornmentColor="Color.Primary" Class="@(_selectedLocation != null ? "validated-field" : "")" Error="@Error"
+        ErrorText="@ErrorText" />
+
+    @if (_isSearching)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudText Typo="Typo.body2">@I18n.GetCommon("searching")</MudText>
+        </MudStack>
+    }
+
+    @if (_selectedLocation == null || _isActivelySearching)
+    {
+        @if (_searchResults.Any())
+        {
+            <MudPaper Elevation="4" Class="search-results-container">
+                <MudList T="string" Dense="true">
+                    @foreach (var location in _searchResults)
+                    {
+                        <MudListItem T="string" OnClick="@(() => SelectLocation(location))" Class="search-result-item">
+                            <MudStack Spacing="0">
+                                <MudText Typo="Typo.body1" Class="location-display-name">@location.DisplayName</MudText>
+                                @if (!string.IsNullOrEmpty(location.Country))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="location-details">
+                                        <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" Class="location-icon" />
+                                        @location.City, @location.Country
+                                    </MudText>
+                                }
+                            </MudStack>
+                        </MudListItem>
+                        <MudDivider />
+                    }
+                </MudList>
+            </MudPaper>
+        }
+        else if (!string.IsNullOrEmpty(_errorCode))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                @I18n.GetError(_errorCode)
+            </MudAlert>
+        }
+        else if (_hasSearched && !_isSearching)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">@I18n.GetMessage("noLocationsFound")</MudText>
+                </MudStack>
+            </MudAlert>
+        }
+    }
+
+    @if (ShowMap && _selectedLocation != null)
+    {
+        <MudPaper Elevation="2" Class="map-wrapper mt-3">
+            <MapView Latitude="_selectedLocation.Latitude" Longitude="_selectedLocation.Longitude" RadiusKm="RadiusKm" />
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public string? InitialCity { get; set; }
+    [Parameter] public double? InitialLatitude { get; set; }
+    [Parameter] public double? InitialLongitude { get; set; }
+    [Parameter] public EventCallback<LocationSearchResult?> OnLocationSelected { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool ShowMap { get; set; } = false;
+    [Parameter] public double? RadiusKm { get; set; }
+    [Parameter] public bool Error { get; set; }
+    [Parameter] public string? ErrorText { get; set; }
+    [Parameter] public bool Required { get; set; }
+
+    private MudTextField<string>? _textFieldRef;
+    private string _searchQuery = string.Empty;
+    private string _displayValue = string.Empty;
+    private LocationSearchResult? _selectedLocation;
+    private List<LocationSearchResult> _searchResults = new();
+    private bool _isSearching;
+    private bool _hasSearched;
+    private bool _isActivelySearching;
+    private string? _errorCode;
+
+    private string GetLabel()
+    {
+        var baseLabel = _selectedLocation != null
+        ? I18n.GetCommon("selectedLocation")
+        : I18n.GetCommon("searchAddress");
+        return Required ? $"{baseLabel}*" : baseLabel;
+    }
+
+    protected override void OnInitialized()
+    {
+        UpdateFromInitialValues();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Update if Initial values change after component initialization
+        if (_selectedLocation == null && !string.IsNullOrEmpty(InitialCity) &&
+        InitialLatitude.HasValue && InitialLongitude.HasValue)
+        {
+            UpdateFromInitialValues();
+        }
+    }
+
+    private void UpdateFromInitialValues()
+    {
+        if (!string.IsNullOrEmpty(InitialCity))
+        {
+            _searchQuery = InitialCity;
+            _displayValue = InitialCity;
+
+            // If we have coordinates from database, treat it as a selected location
+            if (InitialLatitude.HasValue && InitialLongitude.HasValue)
+            {
+                _selectedLocation = new LocationSearchResult
+                {
+                    DisplayName = InitialCity,
+                    Latitude = InitialLatitude.Value,
+                    Longitude = InitialLongitude.Value,
+                    City = InitialCity
+                };
+            }
+        }
+    }
+
+    private async Task PerformSearch()
+    {
+        // Prevent multiple simultaneous searches
+        if (_isSearching)
+            return;
+
+        // Use the current text field value directly
+        var currentSearchQuery = _displayValue?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(currentSearchQuery) || currentSearchQuery.Length < 3)
+            return;
+
+        // Store the search query BEFORE clearing anything
+        _searchQuery = currentSearchQuery;
+
+        // Mark as actively searching to show results
+        _isActivelySearching = true;
+
+        // Clear selection when actually searching
+        _selectedLocation = null;
+
+        _isSearching = true;
+        _hasSearched = false;
+        _errorCode = null;
+        _searchResults.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocationsApi.SearchLocationAsync(_searchQuery, 10);
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                // Filter out invalid results without proper city names or starting with ", "
+                _searchResults = result.Value.Results
+                .Where(r => !string.IsNullOrWhiteSpace(r.City) ||
+                (!r.DisplayName.TrimStart().StartsWith(",") &&
+                !string.IsNullOrWhiteSpace(r.DisplayName)))
+                .ToList();
+
+                _hasSearched = true;
+            }
+            else
+            {
+                _errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+            }
+        }
+        finally
+        {
+            _isSearching = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await PerformSearch();
+        }
+    }
+
+    private async Task SelectAllText()
+    {
+        if (_textFieldRef != null)
+        {
+            await _textFieldRef.SelectAsync();
+        }
+    }
+
+    private async Task SelectLocation(LocationSearchResult location)
+    {
+        _selectedLocation = location;
+        _displayValue = location.DisplayName;
+        _searchResults.Clear();
+        _isActivelySearching = false;
+        await OnLocationSelected.InvokeAsync(location);
+    }
+
+    private void ClearSelection()
+    {
+        _selectedLocation = null;
+        _searchQuery = string.Empty;
+        _displayValue = string.Empty;
+        _searchResults.Clear();
+        _hasSearched = false;
+        _isActivelySearching = false;
+        _errorCode = null;
+    }
+}

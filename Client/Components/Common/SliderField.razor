@@ -1,0 +1,69 @@
+@using Microsoft.AspNetCore.Components
+
+<MudStack Spacing="1" Class="@Class">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Default" Class="mud-input-label">@Label</MudText>
+    }
+    <div class="d-flex align-center gap-3">
+        <MudSlider @bind-Value="CurrentValue" Variant="Variant.Filled" Min="@Min" Max="@Max" Step="@Step" Color="@Color"
+            Size="@Size" ValueLabel="true" Class="slider-flex-container">
+        </MudSlider>
+        <MudChip T="string" Size="Size.Medium" Color="Color.Primary" Variant="Variant.Text" Class="px-3">
+            <MudText Typo="Typo.body1" Class="font-weight-bold">@CurrentValue</MudText>
+            <MudText Typo="Typo.caption" Class="ml-1">@Suffix</MudText>
+        </MudChip>
+    </div>
+    @if (!string.IsNullOrEmpty(HelperText))
+    {
+        <MudText Typo="Typo.caption" Class="mud-input-helper-text pt-4">@HelperText</MudText>
+    }
+</MudStack>
+
+@code {
+    [Parameter]
+    public int Value { get; set; }
+
+    [Parameter]
+    public EventCallback<int> ValueChanged { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? HelperText { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter]
+    public int Min { get; set; } = 1;
+
+    [Parameter]
+    public int Max { get; set; } = 50;
+
+    [Parameter]
+    public int Step { get; set; } = 1;
+
+    [Parameter]
+    public Color Color { get; set; } = Color.Primary;
+
+    [Parameter]
+    public Size Size { get; set; } = Size.Medium;
+
+    [Parameter]
+    public string Suffix { get; set; } = string.Empty;
+
+    private int CurrentValue
+    {
+        get => Value;
+        set
+        {
+            if (Value != value)
+            {
+                Value = value;
+                ValueChanged.InvokeAsync(value);
+            }
+        }
+    }
+}

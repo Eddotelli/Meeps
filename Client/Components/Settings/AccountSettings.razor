@@ -1,0 +1,253 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Common
+@using Shared.Contracts.Users
+@using Shared.Common.Constants
+@implements IDisposable
+@inject II18nService I18n
+@inject IUsersApiClient UsersApi
+@inject ILogger<AccountSettings> Logger
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="0" Class="modern-section-card">
+            <MudCardContent>
+                <div class="modern-section-header">
+                    <div class="section-title-wrapper">
+                        <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("changePassword")</MudText>
+                        <div class="title-accent"></div>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(_passwordSuccessKey))
+                {
+                    <MudAlert Severity="Severity.Success" Class="mb-4" Variant="Variant.Text"
+                        Icon="@Icons.Material.Filled.CheckCircle">
+                        @I18n.GetMessage(_passwordSuccessKey)
+                    </MudAlert>
+                }
+                @if (!string.IsNullOrEmpty(_passwordErrorCode))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4" Variant="Variant.Text">
+                        @I18n.GetError(_passwordErrorCode)
+                    </MudAlert>
+                }
+
+                <EditForm Model="_passwordModel" OnValidSubmit="UpdatePassword">
+                    <LocalizedDataAnnotationsValidator />
+
+                    <MudTextField @bind-Value="_passwordModel.CurrentPassword"
+                        For="@(() => _passwordModel.CurrentPassword)" Label="@I18n.GetCommon("currentPassword")"
+                        Variant="Variant.Outlined" InputType="@_currentPasswordInput" Adornment="Adornment.End"
+                        AdornmentIcon="@_currentPasswordIcon" OnAdornmentClick="ToggleCurrentPasswordVisibility"
+                        Immediate="true" Required="true" HelperText="@I18n.GetHelpText("currentPassword")"
+                        Class="mb-3" />
+
+                    <MudTextField @bind-Value="_passwordModel.NewPassword" For="@(() => _passwordModel.NewPassword)"
+                        Label="@I18n.GetCommon("newPassword")" Variant="Variant.Outlined" InputType="@_newPasswordInput"
+                        Adornment="Adornment.End" AdornmentIcon="@_newPasswordIcon"
+                        OnAdornmentClick="ToggleNewPasswordVisibility" Immediate="true" Required="true"
+                        HelperText="@I18n.GetHelpText("password")" Class="mb-3" />
+
+                    <MudTextField @bind-Value="_passwordModel.ConfirmNewPassword"
+                        For="@(() => _passwordModel.ConfirmNewPassword)" Label="@I18n.GetCommon("confirmNewPassword")"
+                        Variant="Variant.Outlined" InputType="@_confirmPasswordInput" Adornment="Adornment.End"
+                        AdornmentIcon="@_confirmPasswordIcon" OnAdornmentClick="ToggleConfirmPasswordVisibility"
+                        Immediate="true" Required="true" HelperText="@I18n.GetHelpText("confirmNewPassword")"
+                        Class="mb-3" />
+
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                        Disabled="_isUpdatingPassword" Size="Size.Large" Class="rounded-pill">
+                        <Spinner IsLoading="@_isUpdatingPassword" LoadingText="@I18n.GetCommon("updating")"
+                            DefaultText="@I18n.GetCommon("updatePassword")" />
+                    </MudButton>
+                </EditForm>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="0" Class="modern-section-card">
+            <MudCardContent>
+                <div class="modern-section-header">
+                    <div class="section-title-wrapper">
+                        <MudText Typo="Typo.h6" Class="section-title">@I18n.GetCommon("changeEmail")</MudText>
+                        <div class="title-accent"></div>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(_emailSuccessKey))
+                {
+                    <MudAlert Severity="Severity.Success" Class="mb-4" Variant="Variant.Text"
+                        Icon="@Icons.Material.Filled.CheckCircle">
+                        @I18n.GetMessage(_emailSuccessKey)
+                    </MudAlert>
+                }
+                @if (!string.IsNullOrEmpty(_emailErrorCode))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4" Variant="Variant.Text">
+                        @I18n.GetError(_emailErrorCode)
+                    </MudAlert>
+                }
+
+                <EditForm Model="_emailModel" OnValidSubmit="UpdateEmail">
+                    <LocalizedDataAnnotationsValidator />
+
+                    <MudTextField @bind-Value="_emailModel.NewEmail" For="@(() => _emailModel.NewEmail)"
+                        Label="@I18n.GetCommon("newEmail")" Variant="Variant.Outlined" Immediate="true" Required="true"
+                        Class="mb-3" />
+
+                    <MudTextField @bind-Value="_emailModel.Password" For="@(() => _emailModel.Password)"
+                        Label="@I18n.GetCommon("password")" Variant="Variant.Outlined" InputType="@_emailPasswordInput"
+                        Adornment="Adornment.End" AdornmentIcon="@_emailPasswordIcon"
+                        OnAdornmentClick="ToggleEmailPasswordVisibility" Immediate="true" Required="true"
+                        HelperText="@I18n.GetHelpText("confirmPasswordForSecurity")" Class="mb-3" />
+
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                        Disabled="_isUpdatingEmail" Size="Size.Large" Class="rounded-pill">
+                        <Spinner IsLoading="@_isUpdatingEmail" LoadingText="@I18n.GetCommon("updating")"
+                            DefaultText="@I18n.GetCommon("updateEmail")" />
+                    </MudButton>
+                </EditForm>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Delete Account Section -->
+    <MudItem xs="12">
+        <MudDivider Class="my-6" />
+        <DeleteAccountForm />
+    </MudItem>
+</MudGrid>
+
+@code {
+    private UpdatePasswordRequest _passwordModel = new();
+    private UpdateEmailRequest _emailModel = new();
+
+    private bool _isUpdatingPassword;
+    private bool _isUpdatingEmail;
+    private string? _passwordErrorCode;
+    private string? _passwordSuccessKey;
+    private string? _emailErrorCode;
+    private string? _emailSuccessKey;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+
+    // Password visibility toggles
+    private InputType _currentPasswordInput = InputType.Password;
+    private string _currentPasswordIcon = Icons.Material.Filled.VisibilityOff;
+    private InputType _newPasswordInput = InputType.Password;
+    private string _newPasswordIcon = Icons.Material.Filled.VisibilityOff;
+    private InputType _confirmPasswordInput = InputType.Password;
+    private string _confirmPasswordIcon = Icons.Material.Filled.VisibilityOff;
+    private InputType _emailPasswordInput = InputType.Password;
+    private string _emailPasswordIcon = Icons.Material.Filled.VisibilityOff;
+
+    private void ToggleCurrentPasswordVisibility()
+    {
+        if (_currentPasswordInput == InputType.Password)
+        {
+            _currentPasswordInput = InputType.Text;
+            _currentPasswordIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            _currentPasswordInput = InputType.Password;
+            _currentPasswordIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private void ToggleNewPasswordVisibility()
+    {
+        if (_newPasswordInput == InputType.Password)
+        {
+            _newPasswordInput = InputType.Text;
+            _newPasswordIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            _newPasswordInput = InputType.Password;
+            _newPasswordIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private void ToggleConfirmPasswordVisibility()
+    {
+        if (_confirmPasswordInput == InputType.Password)
+        {
+            _confirmPasswordInput = InputType.Text;
+            _confirmPasswordIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            _confirmPasswordInput = InputType.Password;
+            _confirmPasswordIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private void ToggleEmailPasswordVisibility()
+    {
+        if (_emailPasswordInput == InputType.Password)
+        {
+            _emailPasswordInput = InputType.Text;
+            _emailPasswordIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            _emailPasswordInput = InputType.Password;
+            _emailPasswordIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private async Task UpdatePassword()
+    {
+        _isUpdatingPassword = true;
+        _passwordErrorCode = null;
+        _passwordSuccessKey = null;
+
+        var result = await UsersApi.UpdatePasswordAsync(_passwordModel);
+
+        if (result.IsSuccess)
+        {
+            _passwordSuccessKey = "passwordUpdated";
+            _passwordModel = new(); // Reset form
+        }
+        else
+        {
+            _passwordErrorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            Logger.LogWarning("Password update failed. Error Code: '{ErrorCode}'", _passwordErrorCode);
+            Logger.LogWarning("Full Error: Code={Code}, Message={Message}", result.Error?.Code, result.Error?.Message);
+        }
+
+        _isUpdatingPassword = false;
+        StateHasChanged();
+    }
+
+    private async Task UpdateEmail()
+    {
+        _isUpdatingEmail = true;
+        _emailErrorCode = null;
+        _emailSuccessKey = null;
+
+        var result = await UsersApi.UpdateEmailAsync(_emailModel);
+
+        if (result.IsSuccess)
+        {
+            _emailSuccessKey = "emailUpdated";
+            _emailModel = new(); // Reset form
+        }
+        else
+        {
+            _emailErrorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+        }
+
+        _isUpdatingEmail = false;
+    }
+}

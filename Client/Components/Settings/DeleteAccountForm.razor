@@ -1,0 +1,246 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Client.Services
+@using Client.Services.ApiClients
+@using Client.Components.Common
+@using Shared.Contracts.Users
+@using Shared.Common.Constants
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+@inject II18nService I18n
+@inject IUsersApiClient UsersApi
+@inject IAuthApiClient AuthApi
+@inject ILogger<DeleteAccountForm> Logger
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+@inject IEventFilterStateService EventFilterStateService
+
+<MudGrid>
+    <MudItem xs="12">
+        <MudCard Elevation="0" Class="modern-section-card">
+            <MudCardContent>
+                <div class="modern-section-header">
+                    <div class="section-title-wrapper">
+                        <MudText Typo="Typo.h6" Class="section-title">
+                            <MudIcon Icon="@Icons.Material.Filled.DeleteForever" Class="mr-2" />
+                            @I18n.GetCommon("deleteAccount")
+                        </MudText>
+                        <div class="title-accent"></div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_errorCode))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4" Variant="Variant.Filled">
+                        @I18n.GetError(_errorCode)
+                    </MudAlert>
+                }
+
+                <!-- Information about what will happen -->
+                <MudAlert Severity="Severity.Info" Class="mb-4" Variant="Variant.Text">
+                    <MudText Typo="Typo.body1" Class="font-weight-bold mb-2">
+                        @I18n.GetMessage("deleteAccountInfoTitle")
+                    </MudText>
+                    
+                    <MudText Typo="Typo.body2" Class="font-weight-bold mt-3 mb-1">
+                        @I18n.GetMessage("deleteAccountInfoDeleted")
+                    </MudText>
+                    <ul>
+                        <li>@I18n.GetMessage("deleteAccountInfoDeleted1")</li>
+                        <li>@I18n.GetMessage("deleteAccountInfoDeleted2")</li>
+                        <li>@I18n.GetMessage("deleteAccountInfoDeleted3")</li>
+                    </ul>
+                    
+                    <MudText Typo="Typo.body2" Class="font-weight-bold mt-3 mb-1">
+                        @I18n.GetMessage("deleteAccountInfoPreserved")
+                    </MudText>
+                    <ul>
+                        <li>@I18n.GetMessage("deleteAccountInfoPreserved1")</li>
+                    </ul>
+                </MudAlert>
+
+                <MudAlert Severity="Severity.Warning" Class="mb-4" Variant="Variant.Filled">
+                    <MudText Typo="Typo.body1" Class="font-weight-bold">
+                        @I18n.GetMessage("deleteAccountWarning")
+                    </MudText>
+                </MudAlert>
+
+                @if (!_showPasswordForm)
+                {
+                    <MudButton Color="Color.Error"
+                               Variant="Variant.Filled"
+                               StartIcon="@Icons.Material.Filled.DeleteForever"
+                               OnClick="ShowPasswordForm"
+                               Size="Size.Large"
+                               Class="rounded-pill">
+                        @I18n.GetCommon("deleteAccount")
+                    </MudButton>
+                }
+                else
+                {
+                    <EditForm Model="_model" OnValidSubmit="HandlePasswordSubmit">
+                        <LocalizedDataAnnotationsValidator />
+
+                        <MudText Typo="Typo.body1" Class="mb-3">
+                            @I18n.GetMessage("deleteAccountPasswordHelp")
+                        </MudText>
+
+                        <MudTextField @bind-Value="_model.Password"
+                                      For="@(() => _model.Password)"
+                                      Label="@I18n.GetCommon("enterPassword")"
+                                      Variant="Variant.Outlined"
+                                      InputType="@_passwordInput"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@_passwordIcon"
+                                      OnAdornmentClick="TogglePasswordVisibility"
+                                      Immediate="true"
+                                      Required="true"
+                                      HelperText="@I18n.GetHelpText("deleteAccountPassword")"
+                                      Class="mb-3" />
+
+                        <MudCheckBox @bind-Value="_model.ConfirmUnderstanding"
+                                     For="@(() => _model.ConfirmUnderstanding)"
+                                     Label="@I18n.GetCommon("confirmUnderstanding")"
+                                     Color="Color.Error"
+                                     Class="mb-4" />
+
+                        <div class="d-flex gap-2">
+                            <MudButton Color="Color.Default"
+                                       Variant="Variant.Outlined"
+                                       OnClick="CancelDelete"
+                                       Disabled="_isProcessing"
+                                       Size="Size.Large"
+                                       Class="rounded-pill">
+                                @I18n.GetCommon("cancel")
+                            </MudButton>
+
+                            <MudButton ButtonType="ButtonType.Submit"
+                                       Color="Color.Error"
+                                       Variant="Variant.Filled"
+                                       Disabled="_isProcessing || !_model.ConfirmUnderstanding"
+                                       Size="Size.Large"
+                                       Class="rounded-pill">
+                                <Spinner IsLoading="@_isProcessing"
+                                         LoadingText="@I18n.GetCommon("processing")"
+                                         DefaultText="@I18n.GetCommon("confirmDelete")" />
+                            </MudButton>
+                        </div>
+                    </EditForm>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<!-- Final Confirmation Dialog -->
+<ConfirmationDialog 
+    IsVisible="@_showFinalConfirmation"
+    IsVisibleChanged="@((v) => _showFinalConfirmation = v)"
+    IsProcessing="@_isDeleting"
+    Title="@I18n.GetCommon("confirmDelete")"
+    Message="@I18n.GetMessage("deleteAccountFinalConfirm")"
+    WarningMessage="@I18n.GetMessage("deleteAccountWarning")"
+    ConfirmButtonText="@I18n.GetCommon("deleteAccount")"
+    ConfirmButtonColor="Color.Error"
+    OnConfirm="HandleFinalConfirmation" />
+
+@code {
+    private DeleteAccountRequest _model = new();
+    private bool _showPasswordForm = false;
+    private bool _showFinalConfirmation = false;
+    private bool _isProcessing = false;
+    private bool _isDeleting = false;
+    private string? _errorCode;
+
+    private InputType _passwordInput = InputType.Password;
+    private string _passwordIcon = Icons.Material.Filled.VisibilityOff;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    private void ShowPasswordForm()
+    {
+        _showPasswordForm = true;
+        _errorCode = null;
+    }
+
+    private void CancelDelete()
+    {
+        _showPasswordForm = false;
+        _model = new();
+        _errorCode = null;
+    }
+
+    private void TogglePasswordVisibility()
+    {
+        if (_passwordInput == InputType.Password)
+        {
+            _passwordInput = InputType.Text;
+            _passwordIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            _passwordInput = InputType.Password;
+            _passwordIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private void HandlePasswordSubmit()
+    {
+        _errorCode = null;
+        _showPasswordForm = false;
+        _showFinalConfirmation = true;
+    }
+
+    private async Task HandleFinalConfirmation()
+    {
+        _isDeleting = true;
+        _errorCode = null;
+
+        Logger.LogInformation("User confirmed account deletion");
+
+        var result = await UsersApi.DeleteAccountAsync(_model);
+
+        if (result.IsSuccess)
+        {
+            Logger.LogInformation("Account deleted successfully");
+
+            // Show success snackbar
+            Snackbar.Add(I18n.GetMessage(MessageKeys.AccountDeleted), Severity.Success);
+
+            // Give user time to see the snackbar
+            await Task.Delay(2000);
+
+            // Logout to clear JWT tokens (refresh tokens already revoked on server)
+            await AuthApi.LogoutAsync();
+
+            // Clear all state and localStorage to prevent data leakage between users
+            await EventFilterStateService.ClearStateAsync();
+
+            // Notify authentication state has changed (user is now logged out)
+            if (AuthStateProvider is CustomAuthenticationStateProvider customAuthProvider)
+            {
+                customAuthProvider.NotifyAuthenticationStateChanged();
+            }
+
+            // Navigate to login page
+            Navigation.NavigateTo("/login", forceLoad: true);
+        }
+        else
+        {
+            _errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            Logger.LogWarning("Account deletion failed. Error: {ErrorCode}", _errorCode);
+            _showFinalConfirmation = false;
+            _showPasswordForm = true;
+        }
+
+        _isDeleting = false;
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

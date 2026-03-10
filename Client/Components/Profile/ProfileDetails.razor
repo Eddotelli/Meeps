@@ -1,0 +1,47 @@
+@using Client.Services
+@using Shared.Contracts.Users
+@using Shared.Enums
+@using Shared.Extensions
+
+@inject II18nService I18n
+
+<MudText Typo="Typo.h5" Class="mb-2">@Profile.DisplayName</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@Profile.Email</MudText>
+
+@if (!string.IsNullOrEmpty(Profile.Bio))
+{
+    <MudText Typo="Typo.body1" Class="mb-4">
+        <strong>@I18n.GetCommon("bio"):</strong> @Profile.Bio
+    </MudText>
+}
+
+<MudGrid>
+    <MudItem xs="6">
+        <MudText Typo="Typo.body2">
+            <strong>@I18n.GetCommon("birthDate"):</strong>
+        </MudText>
+        <MudText Typo="Typo.body2">
+            @(Profile.BirthDate?.ToString("yyyy-MM-dd") ?? "-")
+        </MudText>
+    </MudItem>
+    <MudItem xs="6">
+        <MudText Typo="Typo.body2">
+            <strong>@I18n.GetCommon("gender"):</strong>
+        </MudText>
+        <MudText Typo="Typo.body2">
+            @(Profile.Gender.HasValue? I18n.GetCommon(Profile.Gender.Value.GetLocalizationKey()) : "-")
+        </MudText>
+    </MudItem>
+    <MudItem xs="6">
+        <MudText Typo="Typo.body2">
+            <strong>@I18n.GetCommon("memberSince"):</strong>
+        </MudText>
+        <MudText Typo="Typo.body2">
+            @Profile.CreatedAt.ToString("yyyy-MM-dd")
+        </MudText>
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public GetUserProfileResponse Profile { get; set; } = null!;
+}

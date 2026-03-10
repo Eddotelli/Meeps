@@ -1,0 +1,427 @@
+@using Shared.Contracts.Locations
+@using Shared.Contracts.Users
+@using Shared.Contracts.Events
+@using Shared.Common.Constants
+@using Client.Services.ApiClients
+@using Client.Services
+@using static Client.Components.Common.MapView
+
+@inject II18nService I18n
+@inject IUsersApiClient UsersApi
+@inject ILocationsApiClient LocationsApi
+@inject IEventsApiClient EventsApi
+@inject IDistanceUnitService DistanceUnit
+@inject IEventFilterService EventFilterService
+@inject ILogger<LocationSelectorDropdown> Logger
+
+@implements IDisposable
+
+<MudStack Spacing="3" Class="location-selector-dropdown">
+    @if (_isLoading)
+    {
+        <Spinner IsLoading="@_isLoading" LoadingText="@I18n.GetCommon("loading")" />
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_errorCode))
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                @I18n.GetError(_errorCode)
+            </MudAlert>
+        }
+
+        @* Location Search & Radius Section *@
+        <div class="location-section-wrapper">
+            <div class="location-section-header">
+                <MudText Typo="Typo.subtitle2" Class="location-section-title">@I18n.GetCommon("searchAddress")</MudText>
+                <MudIcon Icon="@Icons.Material.Filled.LocationOn" Color="Color.Primary" Size="Size.Small" />
+            </div>
+
+            <AddressSearch InitialCity="@_currentCity" InitialLatitude="@_currentLatitude"
+                           InitialLongitude="@_currentLongitude" OnLocationSelected="HandleLocationSelected" ShowMap="false"
+                           RadiusKm="@_searchRadius" />
+        </div>
+
+        @* Search Radius Section *@
+        <div class="location-section-wrapper">
+            <div class="location-section-header">
+                <MudText Typo="Typo.subtitle2" Class="location-section-title">@searchRadiusLabel</MudText>
+                <MudIcon Icon="@Icons.Material.Filled.Radar" Color="Color.Primary" Size="Size.Small" />
+            </div>
+
+            <SliderField Value="@((int)DistanceUnit.GetDisplayRadius(_searchRadius))" ValueChanged="HandleRadiusChanged"
+                         Min="@DistanceUnit.MinRadius" Max="@DistanceUnit.MaxRadius" Step="1" Suffix="@DistanceUnit.DistanceUnit" />
+            <MudDivider Class="my-3" />
+        </div>
+
+        @* Map Section - Collapsible *@
+        @if (_currentLatitude.HasValue && _currentLongitude.HasValue)
+        {
+            <div class="location-section-wrapper">
+                <div class="location-section-header clickable" @onclick="ToggleMap">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Map" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2" Class="location-section-title">@I18n.GetCommon("map")</MudText>
+                    </MudStack>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        @if (_filteredEvents != null && _filteredEvents.Any())
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">
+                                @_filteredEvents.Count @I18n.GetCommon("events")
+                            </MudChip>
+                        }
+                        <MudIcon Icon="@(_isMapExpanded? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                 Color="Color.Primary" Size="Size.Small" />
+                    </MudStack>
+                </div>
+
+                <MudCollapse Expanded="@_isMapExpanded">
+                    <div class="pt-3">
+                        @if (_selectedLocation != null)
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true" Class="mb-3">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                    <MudIcon Icon="@Icons.Material.Filled.NewReleases" Size="Size.Small" />
+                                    <MudText Typo="Typo.body2">
+                                        @I18n.GetCommon("newLocation"): @_selectedLocation.DisplayName
+                                    </MudText>
+                                </MudStack>
+                            </MudAlert>
+                        }
+
+                        <MapView Latitude="@(_selectedLocation?.Latitude ?? _currentLatitude.Value)"
+                                 Longitude="@(_selectedLocation?.Longitude ?? _currentLongitude.Value)" ZoomLevel="7" Height="map-sm"
+                                 ShowMarker="true" RadiusKm="@_searchRadius" Events="@_filteredEvents" Class="map-container"
+                                 OnEventNavigation="HandleEventNavigation" />
+                    </div>
+                </MudCollapse>
+            </div>
+        }
+
+        @if (_isSaving)
+        {
+            <div class="d-flex justify-center mt-2">
+                <Spinner IsLoading="true" LoadingText="@I18n.GetCommon("saving")" />
+            </div>
+        }
+    }
+</MudStack>
+
+@code {
+    [Parameter] public EventCallback<bool> OnLocationChanged { get; set; }
+    [Parameter] public EventCallback OnDropdownClosed { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _radiusChanged = false;
+    private string? _errorCode;
+
+    private string? _currentCity;
+    private double? _currentLatitude;
+    private double? _currentLongitude;
+    private int _searchRadius = 25;
+    private int _savedSearchRadius = 25;
+
+    private LocationSearchResult? _selectedLocation;
+    private List<EventMarkerDto>? _allEvents;
+    private List<EventMarkerDto>? _filteredEvents;
+    private bool _isMapExpanded = false;
+
+    // Localized labels for SliderField
+    private string searchRadiusLabel = string.Empty;
+    private string searchRadiusHelperText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        I18n.OnLanguageChanged += UpdateLabels;
+        DistanceUnit.OnUnitChanged += StateHasChanged;
+        UpdateLabels();
+    }
+
+    private void UpdateLabels()
+    {
+        searchRadiusLabel = I18n.GetCommon("searchRadius");
+        searchRadiusHelperText = I18n.GetHelpText("searchRadiusDescription");
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCurrentLocation();
+        await LoadEventsAsync();
+    }
+
+    private async Task LoadCurrentLocation()
+    {
+        _isLoading = true;
+        _errorCode = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await UsersApi.GetUserPreferencesAsync();
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                _currentCity = result.Value.DefaultCity;
+                _currentLatitude = result.Value.DefaultCityLatitude;
+                _currentLongitude = result.Value.DefaultCityLongitude;
+                _searchRadius = result.Value.SearchRadius;
+                _savedSearchRadius = result.Value.SearchRadius;
+                _radiusChanged = false;
+            }
+            else
+            {
+                _errorCode = result.Error?.Code ?? ErrorCodes.LocationLoadFailed;
+            }
+        }
+        catch (Exception)
+        {
+            _errorCode = ErrorCodes.LocationLoadFailed;
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void HandleLocationSelected(LocationSearchResult? location)
+    {
+        _selectedLocation = location;
+
+        // Check if location actually changed
+        bool hasLocationChanged = location != null &&
+        (location.City != _currentCity ||
+        Math.Abs((location.Latitude - (_currentLatitude ?? 0))) > 0.001 ||
+        Math.Abs((location.Longitude - (_currentLongitude ?? 0))) > 0.001);
+
+        // Save immediately if location changed
+        if (hasLocationChanged)
+        {
+            _ = SaveLocationAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private void HandleRadiusChanged(int newRadius)
+    {
+        _searchRadius = DistanceUnit.ConvertToKilometers(newRadius);
+
+        // Mark that radius has changed
+        if (_searchRadius != _savedSearchRadius)
+        {
+            _radiusChanged = true;
+        }
+
+        // Filter events based on new radius
+        FilterEvents();
+
+        // Notify live radius change for client-side filtering
+        EventFilterService.NotifyRadiusChanged(_searchRadius);
+
+        StateHasChanged();
+    }
+
+    private async Task SaveLocationAsync()
+    {
+        _isSaving = true;
+        _errorCode = null;
+        StateHasChanged();
+
+        try
+        {
+            var request = new UpdateLocationRequest
+            {
+                DefaultCity = _selectedLocation?.DisplayName ?? _currentCity,
+                DefaultCityLatitude = _selectedLocation?.Latitude ?? _currentLatitude,
+                DefaultCityLongitude = _selectedLocation?.Longitude ?? _currentLongitude,
+                SearchRadius = _searchRadius
+            };
+
+            var result = await UsersApi.UpdateLocationAsync(request);
+
+            if (result.IsSuccess)
+            {
+                bool locationChanged = false;
+
+                if (_selectedLocation != null)
+                {
+                    _currentCity = _selectedLocation.DisplayName;
+                    _currentLatitude = _selectedLocation.Latitude;
+                    _currentLongitude = _selectedLocation.Longitude;
+                    _selectedLocation = null;
+                    locationChanged = true;
+                }
+
+                _savedSearchRadius = _searchRadius;
+                _radiusChanged = false;
+
+                // Reload events if location changed
+                if (locationChanged)
+                {
+                    await LoadEventsAsync();
+                }
+
+                // Notify parent whether location changed (true) or just radius (false)
+                await OnLocationChanged.InvokeAsync(locationChanged);
+            }
+            else
+            {
+                _errorCode = result.Error?.Code ?? ErrorCodes.LocationSaveFailed;
+            }
+        }
+        catch (Exception)
+        {
+            _errorCode = ErrorCodes.LocationSaveFailed;
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    public async Task OnMenuClosing()
+    {
+        // Save radius if it was changed
+        if (_radiusChanged && !_isSaving)
+        {
+            await SaveRadiusAsync();
+        }
+    }
+
+    private async Task SaveRadiusAsync()
+    {
+        _isSaving = true;
+        _errorCode = null;
+        StateHasChanged();
+
+        try
+        {
+            var request = new UpdateLocationRequest
+            {
+                DefaultCity = _currentCity,
+                DefaultCityLatitude = _currentLatitude,
+                DefaultCityLongitude = _currentLongitude,
+                SearchRadius = _searchRadius
+            };
+
+            var result = await UsersApi.UpdateLocationAsync(request);
+
+            if (result.IsSuccess)
+            {
+                _savedSearchRadius = _searchRadius;
+                _radiusChanged = false;
+
+                // Notify parent that only radius changed (not location)
+                await OnLocationChanged.InvokeAsync(false);
+            }
+            else
+            {
+                _errorCode = result.Error?.Code ?? ErrorCodes.LocationUpdateRadiusFailed;
+            }
+        }
+        catch (Exception)
+        {
+            _errorCode = ErrorCodes.LocationUpdateRadiusFailed;
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadEventsAsync()
+    {
+        if (!_currentLatitude.HasValue || !_currentLongitude.HasValue)
+        {
+            Logger.LogDebug("LoadEventsAsync: No location coordinates available");
+            return;
+        }
+
+        Logger.LogDebug("LoadEventsAsync: Loading events for location {Latitude}, {Longitude}", _currentLatitude,
+        _currentLongitude);
+
+        try
+        {
+            var request = new GetEligibleEventsRequest
+            {
+                // Don't send Latitude/Longitude - let API use user's default location
+                RadiusKm = 50, // Hämta events inom 50km (max)
+                PageNumber = 1,
+                PageSize = 100,
+                SortBy = "distance"
+            };
+
+            var result = await EventsApi.GetEligibleEventsAsync(request);
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                Logger.LogDebug("LoadEventsAsync: API returned {Count} events", result.Value.Events.Count);
+
+                _allEvents = result.Value.Events
+                .Where(e => e.Latitude.HasValue && e.Longitude.HasValue)
+                .Select(e => new EventMarkerDto
+                {
+                    EventId = e.Id,
+                    EventHash = e.EventHash,
+                    Title = e.Title,
+                    Latitude = e.Latitude!.Value,
+                    Longitude = e.Longitude!.Value,
+                    DistanceKm = e.DistanceKm
+                })
+                .ToList();
+
+                Logger.LogDebug("LoadEventsAsync: Mapped {Count} events with coordinates", _allEvents.Count);
+
+                FilterEvents();
+                Logger.LogDebug("LoadEventsAsync: Filtered to {Count} events within radius", _filteredEvents?.Count ?? 0);
+            }
+            else
+            {
+                Logger.LogWarning("LoadEventsAsync: API failed - {ErrorCode}", result.Error?.Code);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "LoadEventsAsync: Exception while loading events");
+            // Silent fail - map will just not show events
+            _allEvents = new List<EventMarkerDto>();
+            _filteredEvents = new List<EventMarkerDto>();
+        }
+    }
+
+    private void FilterEvents()
+    {
+        if (_allEvents == null)
+        {
+            _filteredEvents = new List<EventMarkerDto>();
+            return;
+        }
+
+        _filteredEvents = _allEvents
+        .Where(e => !e.DistanceKm.HasValue || e.DistanceKm.Value <= _searchRadius)
+        .ToList();
+    }
+
+    private void ToggleMap()
+    {
+        _isMapExpanded = !_isMapExpanded;
+        StateHasChanged();
+    }
+
+    private async Task HandleEventNavigation()
+    {
+        // Close the dropdown when navigating to an event
+        await OnDropdownClosed.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= UpdateLabels;
+        DistanceUnit.OnUnitChanged -= StateHasChanged;
+    }
+}

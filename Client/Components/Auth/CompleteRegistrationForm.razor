@@ -1,0 +1,110 @@
+@using Shared.Contracts.Auth
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Services
+@inject II18nService I18n
+
+<EditForm Model="@CompleteRegistrationRequest" OnValidSubmit="@HandleSubmit">
+    <LocalizedDataAnnotationsValidator />
+
+    <MudTextField @bind-Value="CompleteRegistrationRequest.DisplayName"
+                  For="@(() => CompleteRegistrationRequest.DisplayName)" Label="@I18n.GetCommon("displayName")"
+                  Variant="Variant.Outlined" Immediate="true" Required="true"
+                  Class="@($"mb-3 {(!string.IsNullOrWhiteSpace(CompleteRegistrationRequest.DisplayName) ? "validated-field" : "")}")"
+                  HelperText="@I18n.GetHelpText("displayName")" />
+    <MudStack Row="true" Spacing="1" Class="mb-3">
+        <MudTextField @bind-Value="CompleteRegistrationRequest.Password"
+                      For="@(() => CompleteRegistrationRequest.Password)" Label="@I18n.GetCommon("password")"
+                      Variant="Variant.Outlined" InputType="@passwordInput" Immediate="true" Required="true"
+                      Class="@($"flex-grow-1 {(!string.IsNullOrWhiteSpace(CompleteRegistrationRequest.Password) ? "validated-field" : "")}")"
+                      Adornment="Adornment.End" AdornmentIcon="@passwordInputIcon"                  OnAdornmentClick="TogglePasswordVisibility"
+                      AdornmentAriaLabel="@I18n.GetCommon("showPassword")"           HelperText="@I18n.GetHelpText("password")" />
+
+        <MudMenu AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.BottomLeft" Dense="true"
+                 Class="password-info-menu">
+            <ActivatorContent>
+                <MudIconButton Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Color="Color.Default"
+                               aria-label="Password requirements" />
+            </ActivatorContent>
+            <ChildContent>
+                <MudPaper Class="pa-4 password-requirements-popup" Elevation="0">
+                    <MudText Typo="Typo.body2">
+                        @I18n.GetValidation("passwordRequirementsDescription")
+                    </MudText>
+                </MudPaper>
+            </ChildContent>
+        </MudMenu>
+    </MudStack>
+
+    <PasswordRequirementsIndicator Password="@CompleteRegistrationRequest.Password" />
+
+    <MudCheckBox @bind-Value="CompleteRegistrationRequest.AcceptTerms"
+                 For="@(() => CompleteRegistrationRequest.AcceptTerms)" Required="true" Color="Color.Primary" Class="mb-3">
+        <MudText Inline="true" Typo="Typo.body2">
+            @I18n.GetCommon("acceptTermsLabel")
+            <MudLink Href="/terms" Target="_blank" Class="" Typo="Typo.body2">@I18n.GetCommon("termsLink")</MudLink>
+        </MudText>
+    </MudCheckBox>
+
+    <MudDivider Class="mb-3" />
+
+    <MudDatePicker @bind-Date="CompleteRegistrationRequest.BirthDate"
+                   For="@(() => CompleteRegistrationRequest.BirthDate)"
+                   Label="@($"{I18n.GetCommon("birthDate")} ({I18n.GetCommon("optional")})")" Variant="Variant.Outlined"
+                   Clearable="true" MaxDate="@DateTime.Today.AddYears(-18)" MinDate="@DateTime.Today.AddYears(-99)"
+                   PickerMonth="@(new DateTime(DateTime.Today.Year - 25, 1, 1))" Editable="false" DateFormat="yyyy-MM-dd"
+                   Class="@($"mb-3 {(CompleteRegistrationRequest.BirthDate.HasValue ? "validated-field" : "")}")"
+                   HelperText="@I18n.GetHelpText("birthDate")" />
+
+    <MudSelect @bind-Value="CompleteRegistrationRequest.Gender" For="@(() => CompleteRegistrationRequest.Gender)"
+               Label="@($"{I18n.GetCommon("gender")} ({I18n.GetCommon("optional")})")" Variant="Variant.Outlined"
+               Class="@($"mb-3 {(CompleteRegistrationRequest.Gender.HasValue ? "validated-field" : "")}")" Clearable="true"
+               T="Gender?" HelperText="@I18n.GetHelpText("gender")">
+        @foreach (var gender in GenderExtensions.GetAll())
+        {
+            <MudSelectItem Value="@((Gender?)gender)">@I18n.GetCommon(gender.GetLocalizationKey())</MudSelectItem>
+        }
+    </MudSelect>
+
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+               Disabled="@IsLoading" Class="mt-3 rounded-pill">
+        <Spinner IsLoading="@IsLoading" LoadingText="@I18n.GetCommon("completing")"
+                 DefaultText="@I18n.GetCommon("completeRegistration")" />
+    </MudButton>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired]
+    public CompleteRegistrationRequest CompleteRegistrationRequest { get; set; } = new();
+
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    [Parameter]
+    public EventCallback<CompleteRegistrationRequest> OnSubmit { get; set; }
+
+    private bool isPasswordVisible;
+    private InputType passwordInput = InputType.Password;
+    private string passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+
+    private void TogglePasswordVisibility()
+    {
+        if (isPasswordVisible)
+        {
+            isPasswordVisible = false;
+            passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+            passwordInput = InputType.Password;
+        }
+        else
+        {
+            isPasswordVisible = true;
+            passwordInputIcon = Icons.Material.Filled.Visibility;
+            passwordInput = InputType.Text;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        await OnSubmit.InvokeAsync(CompleteRegistrationRequest);
+    }
+}

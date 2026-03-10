@@ -1,0 +1,19 @@
+@inject ILogger<ProfileImage> Logger
+
+@if (!string.IsNullOrEmpty(ProfileImageUrl))
+{
+    <div class="profile-image-container">
+        <MudImage Src="@ProfileImageUrl" Alt="@DisplayName" Class="profile-image" />
+    </div>
+}
+else
+{
+    <div class="profile-image-container profile-image-placeholder">
+        <MudText Typo="Typo.h3" Color="Color.Surface">@(DisplayName?[0])</MudText>
+    </div>
+}
+
+@code {
+    [Parameter] public string? ProfileImageUrl { get; set; }
+    [Parameter] public string? DisplayName { get; set; }
+}

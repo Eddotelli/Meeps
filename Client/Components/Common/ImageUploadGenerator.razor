@@ -1,0 +1,357 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Shared.Common.Constants
+@using Shared.Contracts.Images
+@using Shared.Enums
+@using Client.Services
+@using Client.Services.ApiClients
+@using Microsoft.JSInterop
+@inject II18nService I18n
+@inject IImagesApiClient ImagesApi
+@inject ILogger<ImageUploadGenerator> Logger
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="image-upload-container @Class">
+    @* Image Preview/Placeholder *@
+    <div class="image-preview-container @(Context == "Profile" ? "profile-variant" : "")" @onclick="OpenFilePicker">
+        @if (!string.IsNullOrEmpty(CurrentImageUrl))
+        {
+            <MudImage Src="@CurrentImageUrl" Alt="@I18n.GetCommon("imagePreview")" Class="preview-image" />
+            @if (!IsUploading && !IsGenerating)
+            {
+                <div class="image-overlay">
+                    <MudStack Spacing="1" AlignItems="AlignItems.Center">
+                        <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Large" />
+                        <MudText Typo="Typo.body1" Class="overlay-text">@I18n.GetCommon("uploadImage")</MudText>
+                    </MudStack>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="image-placeholder">
+                <MudStack Spacing="1" AlignItems="AlignItems.Center">
+                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Large" Color="Color.Primary" />
+                    <MudText Typo="Typo.body1" Class="placeholder-text">@I18n.GetCommon("uploadImage")</MudText>
+                </MudStack>
+            </div>
+        }
+
+        @if (IsUploading || IsGenerating)
+        {
+            <div class="image-loading-overlay">
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+                <MudText Typo="Typo.body2" Class="mt-2">
+                    @(IsUploading? I18n.GetCommon("uploading") : I18n.GetCommon("generating"))
+                </MudText>
+            </div>
+        }
+    </div>
+
+    @* Hidden file input *@
+    <InputFile OnChange="HandleFileSelected" accept="image/*" style="display:none" @ref="fileInputRef"
+               id="@GetFileInputId()" />
+
+    <MudDivider Class="my-3" />
+
+    @* AI Generation Section - Smart Button *@
+    <MudStack Spacing="2">
+        <MudTextField @bind-Value="aiPrompt" Label="@I18n.GetCommon("generateWithAI")"
+                      Placeholder="@(Context == "Profile" ? @I18n.GetHelpText("aiProfilePrompt") : @I18n.GetHelpText("aiEventPrompt"))"
+                      Variant="Variant.Outlined" Disabled="@(IsUploading || IsGenerating)" Immediate="true"
+                      OnKeyDown="HandleKeyDown" />
+
+        <MudButton OnClick="GenerateImage"                   Disabled="@(!CanGenerate() || IsGenerating || IsUploading)"
+                   Variant="Variant.Filled"                   Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                   FullWidth="true">
+            @GetGenerateButtonText()
+        </MudButton>
+
+        @if (string.IsNullOrWhiteSpace(aiPrompt) && CanGenerateFromEventDetails())
+        {
+            <MudText Typo="Typo.caption" Color="Color.Info" Class="mt-1">
+                @I18n.GetCommon("willGenerateFromEventDetails")
+            </MudText>
+        }
+    </MudStack>
+
+    @* Error Alert *@
+    @if (!string.IsNullOrEmpty(errorCode))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-3" CloseIcon="@Icons.Material.Filled.Close"
+                  CloseIconClicked="ClearError">
+            @I18n.GetError(errorCode)
+        </MudAlert>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Context { get; set; } = "Event"; // "Profile" or "Event"
+    [Parameter] public string? InitialImageUrl { get; set; }
+    [Parameter] public EventCallback<string> OnImageChanged { get; set; }
+    [Parameter] public EventCallback<string> OnBase64ImageGenerated { get; set; } // NEW: for base64 data
+    [Parameter] public string Class { get; set; } = string.Empty;
+    [Parameter] public int? MaxParticipants { get; set; } // Max participants for Event context (from slider)
+    [Parameter] public string? EventTitle { get; set; }
+    [Parameter] public string? EventDescription { get; set; }
+    [Parameter] public int? MinAge { get; set; }
+    [Parameter] public int? MaxAge { get; set; }
+    [Parameter] public GenderRestriction? GenderRestriction { get; set; }
+    [Parameter] public int? CategoryId { get; set; }
+
+    private InputFile? fileInputRef;
+    private string? CurrentImageUrl; // For display (can be URL or data URL)
+    private string? currentBase64Data; // Store base64 data separately
+    private string aiPrompt = string.Empty;
+    private bool IsUploading = false;
+    private bool IsGenerating = false;
+    private string? errorCode;
+
+    protected override void OnInitialized()
+    {
+        CurrentImageUrl = InitialImageUrl;
+        I18n.OnLanguageChanged += StateHasChanged;
+    }
+
+    private string GetFileInputId() => $"fileInput-{Context}";
+
+    private async Task OpenFilePicker()
+    {
+        if (IsUploading || IsGenerating) return;
+        try
+        {
+            await JS.InvokeVoidAsync("eval", $"document.getElementById('{GetFileInputId()}').click()");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to open file picker");
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        // Clear previous messages
+        errorCode = null;
+
+        // Validate file size (5MB)
+        if (file.Size > 5 * 1024 * 1024)
+        {
+            errorCode = ErrorCodes.ImageFileTooLarge;
+            return;
+        }
+
+        // Validate file type
+        var allowedTypes = new[] { "image/jpeg", "image/jpg", "image/png", "image/webp" };
+        if (!allowedTypes.Contains(file.ContentType.ToLowerInvariant()))
+        {
+            errorCode = ErrorCodes.ImageInvalidFormat;
+            return;
+        }
+
+        IsUploading = true;
+        StateHasChanged();
+
+        try
+        {
+            // Read file stream
+            using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
+
+            // Upload to API
+            var result = await ImagesApi.UploadImageAsync(memoryStream, file.Name, Context);
+
+            if (result.IsSuccess && !string.IsNullOrEmpty(result.Value.ImageUrl))
+            {
+                CurrentImageUrl = result.Value.ImageUrl;
+                currentBase64Data = null; // Clear base64 since we have a URL
+                await OnImageChanged.InvokeAsync(CurrentImageUrl);
+                await OnBase64ImageGenerated.InvokeAsync(string.Empty); // Clear base64 in parent
+                Snackbar.Add(I18n.GetMessage(result.Value.MessageKey ?? string.Empty), Severity.Success);
+                Logger.LogInformation("Image uploaded successfully: {ImageUrl}", CurrentImageUrl);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? ErrorCodes.ImageUploadFailed;
+                Logger.LogWarning("Image upload failed: {ErrorCode}", errorCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception during image upload");
+            errorCode = ErrorCodes.ImageUploadFailed;
+        }
+        finally
+        {
+            IsUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateImage()
+    {
+        // Clear previous messages
+        errorCode = null;
+
+        // Use custom prompt or auto-generate from event details
+        var promptToUse = !string.IsNullOrWhiteSpace(aiPrompt)
+            ? aiPrompt
+            : BuildPromptFromEventDetails();
+
+        if (string.IsNullOrWhiteSpace(promptToUse))
+        {
+            Logger.LogWarning("Cannot generate image: no prompt and insufficient event details");
+            return;
+        }
+
+        IsGenerating = true;
+        StateHasChanged();
+
+        try
+        {
+            // Use MaxParticipants only for Event context
+            var participantCount = Context == "Event" ? MaxParticipants : null;
+            var result = await ImagesApi.GenerateImageAsync(promptToUse, Context, participantCount);
+
+            Logger.LogInformation("Generating image with prompt: {Prompt}, participantCount: {Count}", promptToUse,
+participantCount);
+
+            if (result.IsSuccess && !string.IsNullOrEmpty(result.Value.Base64Image))
+            {
+                // Store base64 data
+                currentBase64Data = result.Value.Base64Image;
+
+                // Create data URL for preview
+                var mimeType = result.Value.MimeType ?? "image/png";
+                CurrentImageUrl = $"data:{mimeType};base64,{currentBase64Data}";
+
+                // Notify parent about base64 data
+                await OnBase64ImageGenerated.InvokeAsync(currentBase64Data);
+                await OnImageChanged.InvokeAsync(string.Empty); // Clear URL since we have base64
+
+                Snackbar.Add(I18n.GetMessage(result.Value.MessageKey ?? string.Empty), Severity.Success);
+                aiPrompt = string.Empty; // Clear prompt on success
+                Logger.LogInformation("Image generated successfully (base64), size: {Size} bytes",
+                currentBase64Data.Length);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? ErrorCodes.ImageGenerationFailed;
+                Logger.LogWarning("Image generation failed: {ErrorCode}", errorCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception during image generation");
+            errorCode = ErrorCodes.ImageGenerationFailed;
+        }
+        finally
+        {
+            IsGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearError()
+    {
+        errorCode = null;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && CanGenerate() && !IsGenerating && !IsUploading)
+        {
+            await GenerateImage();
+        }
+    }
+
+    private string BuildPromptFromEventDetails()
+    {
+        if (Context != "Event") return string.Empty;
+
+        var parts = new List<string>();
+
+        // Activity from title
+        if (!string.IsNullOrWhiteSpace(EventTitle))
+        {
+            parts.Add(EventTitle.ToLower());
+        }
+
+        // Gender mix
+        if (GenderRestriction.HasValue)
+        {
+            var genderDescription = GenderRestriction.Value switch
+            {
+                Shared.Enums.GenderRestriction.MaleOnly => "men only",
+                Shared.Enums.GenderRestriction.FemaleOnly => "women only",
+                Shared.Enums.GenderRestriction.NonBinaryOnly => "non-binary people only",
+                _ => "mixed gender group"
+            };
+            parts.Add(genderDescription);
+        }
+
+        // Age group
+        if (MinAge.HasValue && MaxAge.HasValue)
+        {
+            var ageDescription = (MinAge.Value, MaxAge.Value) switch
+            {
+                ( >= 18, <= 25) => "young adults",
+                ( >= 26, <= 35) => "adults in their late twenties to mid-thirties",
+                ( >= 36, <= 50) => "middle-aged adults",
+                ( >= 51, _) => "mature adults",
+                _ => "adults"
+            };
+            parts.Add($"aged {MinAge}-{MaxAge}, {ageDescription}");
+        }
+
+        // Description details
+        if (!string.IsNullOrWhiteSpace(EventDescription))
+        {
+            // Take first 100 characters of description to avoid too long prompts
+            var desc = EventDescription.Length > 100
+                ? EventDescription.Substring(0, 100).ToLower()
+                : EventDescription.ToLower();
+            parts.Add(desc);
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private bool CanGenerateFromEventDetails()
+    {
+        return Context == "Event" &&
+               !string.IsNullOrWhiteSpace(EventTitle) &&
+               !string.IsNullOrWhiteSpace(EventDescription) &&
+               MaxParticipants.HasValue;
+    }
+
+    private bool CanGenerate()
+    {
+        return !string.IsNullOrWhiteSpace(aiPrompt) || CanGenerateFromEventDetails();
+    }
+
+    private string GetGenerateButtonText()
+    {
+        if (!string.IsNullOrWhiteSpace(aiPrompt))
+        {
+            return I18n.GetCommon("generateImage");
+        }
+        else if (CanGenerateFromEventDetails())
+        {
+            return I18n.GetCommon("autoGenerate");
+        }
+        else
+        {
+            return I18n.GetCommon("generateImage");
+        }
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= StateHasChanged;
+    }
+}

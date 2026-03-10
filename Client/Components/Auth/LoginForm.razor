@@ -1,0 +1,60 @@
+@using Shared.Contracts.Auth
+@using Client.Services
+@inject II18nService I18n
+
+<EditForm Model="@LoginRequest" OnValidSubmit="@HandleSubmit">
+    <LocalizedDataAnnotationsValidator />
+
+    <MudTextField @bind-Value="LoginRequest.Email" For="@(() => LoginRequest.Email)" Label="@I18n.GetCommon("email")"
+        Variant="Variant.Outlined" InputType="InputType.Email" Immediate="true" Required="true" Class="mb-3" />
+
+    <MudTextField @bind-Value="LoginRequest.Password" For="@(() => LoginRequest.Password)"
+        Label="@I18n.GetCommon("password")" Variant="Variant.Outlined" InputType="@passwordInput" Immediate="true"
+        Required="true" Class="mb-3" Adornment="Adornment.End" AdornmentIcon="@passwordInputIcon"
+        OnAdornmentClick="TogglePasswordVisibility" AdornmentAriaLabel="@I18n.GetCommon("showPassword")" />
+
+    <MudCheckBox @bind-Value="LoginRequest.RememberMe" Label="@I18n.GetCommon("rememberMe")" Color="Color.Primary"
+        Class="mb-3" />
+
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+        Disabled="@IsLoading" Class="mt-3 rounded-pill">
+        <Spinner IsLoading="@IsLoading" LoadingText="@I18n.GetCommon("loggingIn")"
+            DefaultText="@I18n.GetCommon("login")" />
+    </MudButton>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired]
+    public LoginRequest LoginRequest { get; set; } = new();
+
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    [Parameter]
+    public EventCallback<LoginRequest> OnSubmit { get; set; }
+
+    private bool isPasswordVisible;
+    private InputType passwordInput = InputType.Password;
+    private string passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+
+    private void TogglePasswordVisibility()
+    {
+        if (isPasswordVisible)
+        {
+            isPasswordVisible = false;
+            passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+            passwordInput = InputType.Password;
+        }
+        else
+        {
+            isPasswordVisible = true;
+            passwordInputIcon = Icons.Material.Filled.Visibility;
+            passwordInput = InputType.Text;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        await OnSubmit.InvokeAsync(LoginRequest);
+    }
+}

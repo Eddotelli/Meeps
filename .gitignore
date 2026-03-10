@@ -1,0 +1,60 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# User-specific files
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Local seed data (development only)
+**/EventSeeder.cs
+**/EVENT_SEEDER_README.md
+
+# Uploaded images (development/local only)
+**/wwwroot/uploads/*
+!**/wwwroot/uploads/.gitkeep
+
+# Logs
+*.log
+
+# NuGet
+*.nupkg
+**/packages/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test Results & Coverage
+**/TestResults/
+**/coverage/
+**/coverage-report/
+**/*.trx
+**/*.coverage
+**/*.coveragexml
+**/*.opencover.xml
+coverage.json
+coverage.opencover.xml
+newman-report.html
+
+# Test Databases
+**/*TestDatabase*.db
+
+# Empty test project folders
+Client.Tests/
+Shared.Tests/
+
+# Production secrets (never commit!)
+Tests/Postman/*production*.json
+
+# Google Cloud credentials
+**/meeps-imagen-credentials.json
+**/*-service-account.json

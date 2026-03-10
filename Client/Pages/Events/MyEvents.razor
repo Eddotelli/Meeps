@@ -1,0 +1,299 @@
+@page "/events/my-events"
+@using Shared.Contracts.Events
+@using Client.Components.Events
+@using Client.Components.Common
+@using Client.Services.ApiClients
+@using Client.Services
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@implements IDisposable
+@inject IEventsApiClient EventsApiClient
+@inject NavigationManager Navigation
+@inject II18nService I18n
+@inject ILogger<MyEvents> Logger
+@inject ISnackbar Snackbar
+
+<PageTitle>@I18n.GetCommon("myEvents")</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-8">
+    <div class="page-title-wrapper mb-6">
+        <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon("myEvents")</MudText>
+        <div class="title-accent"></div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorCode))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4" CloseIconClicked="@(() => errorCode = null)" ShowCloseIcon="true">
+            @I18n.GetError(errorCode)
+        </MudAlert>
+    }
+
+    <div class="tabs-with-inline-nav">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" 
+                       Color="Color.Primary"
+                       Class="tab-nav-inline tab-nav-prev"
+                       Size="Size.Medium"
+                       Disabled="@(activeTabIndex == 0)" 
+                       OnClick="NavigatePrevious" />
+
+        <div class="tabs-flex-content">
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Class="modern-tabs"
+                     SliderColor="Color.Primary" Position="Position.Top" @bind-ActivePanelIndex="activeTabIndex"
+                     @bind-ActivePanelIndex:after="OnTabChanged">        
+            <MudTabPanel Text="@I18n.GetCommon("myCreatedEvents")" Icon="@Icons.Material.Filled.Event">
+                @if (isLoadingMyEvents)
+                {
+                    <div class="d-flex justify-center align-center loading-container">
+                        <Spinner />
+                    </div>
+                }
+                else if (myCreatedEvents.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">
+                        @I18n.GetMessage("noEventsCreated")
+                    </MudAlert>
+                    <div class="mt-4">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                   Href="/events/create">
+                            @I18n.GetCommon("createEvent")
+                        </MudButton>
+                    </div>
+                }
+                else
+                {
+                    <MudGrid Spacing="3" Class="mb-8">
+                        @foreach (var eventItem in myCreatedEvents)
+                        {
+                            <MudItem xs="12" sm="6" md="4" lg="3" xl="3">
+                                <EventCard Event="@eventItem" />
+                            </MudItem>
+                        }
+                    </MudGrid>
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="@I18n.GetCommon("participatingEvents")" Icon="@Icons.Material.Filled.Group">
+                @if (isLoadingParticipating)
+                {
+                    <div class="d-flex justify-center align-center loading-container">
+                        <Spinner />
+                    </div>
+                }
+                else if (myParticipatingEvents.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">
+                        @I18n.GetMessage("noParticipatingEvents")
+                    </MudAlert>
+                    <div class="mt-4">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Explore"
+                                   Href="/">
+                            @I18n.GetCommon("discoverEvents")
+                        </MudButton>
+                    </div>
+                }
+                else
+                {
+                    <MudGrid Spacing="3" Class="mb-8">
+                        @foreach (var eventItem in myParticipatingEvents)
+                        {
+                            <MudItem xs="12" sm="6" md="4" lg="3" xl="3">
+                                <EventCard Event="@eventItem" />
+                            </MudItem>
+                        }
+                    </MudGrid>
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="@I18n.GetCommon("archivedEvents")" Icon="@Icons.Material.Filled.Archive">
+                @if (isLoadingArchived)
+                {
+                    <div class="d-flex justify-center align-center loading-container">
+                        <Spinner />
+                    </div>
+                }
+                else if (myArchivedEvents.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">
+                        @I18n.GetMessage("noArchivedEvents")
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudGrid Spacing="3" Class="mb-8">
+                        @foreach (var eventItem in myArchivedEvents)
+                        {
+                            <MudItem xs="12" sm="6" md="4" lg="3" xl="3">
+                                <EventCard Event="@eventItem" />
+                            </MudItem>
+                        }
+                    </MudGrid>
+                }
+            </MudTabPanel>
+            </MudTabs>
+        </div>
+
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" 
+                       Color="Color.Primary"
+                       Class="tab-nav-inline tab-nav-next"
+                       Size="Size.Medium"
+                       Disabled="@(activeTabIndex == 2)" 
+                       OnClick="NavigateNext" />
+    </div>
+</MudContainer>
+
+@code {
+    private List<GetEventDetailsResponse> myCreatedEvents = new();
+    private List<GetEventDetailsResponse> myParticipatingEvents = new();
+    private List<GetEventDetailsResponse> myArchivedEvents = new();
+    private string? errorCode;
+    private bool isLoadingMyEvents = true;
+    private bool isLoadingParticipating = false;
+    private bool isLoadingArchived = false;
+    private int activeTabIndex = 0;
+
+    private async Task NavigatePrevious()
+    {
+        if (activeTabIndex > 0)
+        {
+            activeTabIndex--;
+            await OnTabChanged();
+        }
+    }
+
+    private async Task NavigateNext()
+    {
+        if (activeTabIndex < 2)
+        {
+            activeTabIndex++;
+            await OnTabChanged();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLanguageChanged += OnLanguageChangedHandler;
+        await LoadMyCreatedEvents();
+    }
+
+    private async Task LoadMyCreatedEvents()
+    {
+        isLoadingMyEvents = true;
+        errorCode = null;
+
+        try
+        {
+            var result = await EventsApiClient.GetMyEventsAsync();
+
+            if (result.IsSuccess)
+            {
+                myCreatedEvents = result.Value ?? new List<GetEventDetailsResponse>();
+                Logger.LogInformation("Loaded {Count} created events", myCreatedEvents.Count);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+                Logger.LogError("Failed to load created events: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading created events");
+            errorCode = "GENERAL.SERVER_ERROR";
+        }
+        finally
+        {
+            isLoadingMyEvents = false;
+        }
+    }
+
+    private async Task OnTabChanged()
+    {
+        switch (activeTabIndex)
+        {
+            case 0: // My Created Events
+                if (myCreatedEvents.Count == 0 && !isLoadingMyEvents)
+                    await LoadMyCreatedEvents();
+                break;
+            case 1: // Participating Events
+                if (myParticipatingEvents.Count == 0 && !isLoadingParticipating)
+                    await LoadParticipatingEvents();
+                break;
+            case 2: // Archived Events
+                if (myArchivedEvents.Count == 0 && !isLoadingArchived)
+                    await LoadArchivedEvents();
+                break;
+        }
+    }
+
+    private async Task LoadParticipatingEvents()
+    {
+        isLoadingParticipating = true;
+        errorCode = null;
+
+        try
+        {
+            var result = await EventsApiClient.GetMyParticipatingEventsAsync();
+
+            if (result.IsSuccess)
+            {
+                myParticipatingEvents = result.Value ?? new List<GetEventDetailsResponse>();
+                Logger.LogInformation("Loaded {Count} participating events", myParticipatingEvents.Count);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+                Logger.LogError("Failed to load participating events: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading participating events");
+            errorCode = "GENERAL.SERVER_ERROR";
+        }
+        finally
+        {
+            isLoadingParticipating = false;
+        }
+    }
+
+    private async Task LoadArchivedEvents()
+    {
+        isLoadingArchived = true;
+        errorCode = null;
+
+        try
+        {
+            var result = await EventsApiClient.GetMyArchivedEventsAsync();
+
+            if (result.IsSuccess)
+            {
+                myArchivedEvents = result.Value ?? new List<GetEventDetailsResponse>();
+                Logger.LogInformation("Loaded {Count} archived events", myArchivedEvents.Count);
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? "GENERAL.SERVER_ERROR";
+                Logger.LogError("Failed to load archived events: {Error}", result.Error?.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading archived events");
+            errorCode = "GENERAL.SERVER_ERROR";
+        }
+        finally
+        {
+            isLoadingArchived = false;
+        }
+    }
+
+    private void OnLanguageChangedHandler()
+    {
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= OnLanguageChangedHandler;
+    }
+}

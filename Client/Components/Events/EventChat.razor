@@ -1,0 +1,892 @@
+@using Client.Services.ApiClients
+@using Client.Services
+@using Client.Helpers
+@using Shared.Contracts.Messages
+@using Shared.Common.Constants
+@using MudBlazor
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@implements IDisposable
+
+@inject IMessagesApiClient MessagesApiClient
+@inject II18nService I18n
+@inject ISnackbar Snackbar
+@inject ILogger<EventChat> Logger
+@inject IChatSignalRService SignalRService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JSRuntime
+@inject ModerationAlertService ModerationAlert
+
+<MudPaper Class="chat-panel-wrapper" Elevation="4">
+    <div class="chat-panel-header">
+        <div class="d-flex align-center" style="gap: 8px;">
+            <MudIcon Icon="@Icons.Material.Filled.Chat" />
+            <MudText Typo="Typo.h5">@I18n.GetCommon("eventChat")</MudText>
+            @if (IsParticipant && !isConnectedToSignalR)
+            {
+                <MudTooltip Text="@I18n.GetCommon("notConnectedRealTime")">
+                    <MudIcon Icon="@Icons.Material.Filled.WifiOff" Size="Size.Small" Color="Color.Error" />
+                </MudTooltip>
+            }
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Inherit" OnClick="@HandleClose"
+                       Class="chat-close-button" aria-label="@I18n.GetCommon("close")" />
+    </div>
+    <div class="chat-panel-content">
+        @if (!IsParticipant)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" />
+                    <div>
+                        <MudText Typo="Typo.body1">@I18n.GetCommon("participantOnly")</MudText>
+                        <MudText Typo="Typo.body2">@I18n.GetCommon("joinEventToChat")</MudText>
+                    </div>
+                </div>
+            </MudAlert>
+        }
+        else
+        {
+            <div class="chat-messages-container">
+                @* Messages list *@
+                <div class="chat-messages" style="overflow-y: auto;" @ref="chatContainer" @onscroll="HandleScroll">
+                    @if (isLoadingMessages)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Default" Align="Align.Center" Class="my-8">
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            @I18n.GetCommon("loadingMessages")
+                        </MudText>
+                    }
+                    else if (!string.IsNullOrEmpty(loadErrorCode))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mb-3">
+                            @I18n.GetError(loadErrorCode)
+                        </MudAlert>
+                    }
+                    else if (messages.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Default" Align="Align.Center" Class="my-8">
+                            @I18n.GetCommon("noMessages")
+                        </MudText>
+                    }
+                    else
+                    {
+                        @if (hasMoreMessages)
+                        {
+                            <div class="d-flex justify-center my-3">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadMoreMessages"
+                                           Disabled="@isLoadingMore">
+                                    @if (isLoadingMore)
+                                    {
+                                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                    }
+                                    @I18n.GetCommon("loadMore")
+                                </MudButton>
+                            </div>
+                        }
+
+                        @foreach (var group in GetGroupedMessages())
+                        {
+                            var position = DeterminePosition(group.Key);
+                            var firstMessage = group.First();
+
+                            <MudChat ChatPosition="@position" Dense="true" Class="mb-3">
+                                @if (!string.IsNullOrEmpty(firstMessage.ProfileImageUrl))
+                                {
+                                    <MudAvatar Size="Size.Small" Class="@(firstMessage.IsUserBlocked ? "avatar-blocked" : "")">
+                                        <MudImage Src="@firstMessage.ProfileImageUrl" />
+                                    </MudAvatar>
+                                }
+                                else
+                                {
+                                    <MudAvatar Size="Size.Small" Color="Color.Primary" Class="@(firstMessage.IsUserBlocked ? "avatar-blocked" : "")">
+                                        @UserHelper.GetInitials(firstMessage.UserName)
+                                    </MudAvatar>
+                                }
+                                <MudChatHeader Name="@firstMessage.UserName" Time="@FormatTime(firstMessage.SentAt)" />
+
+                                @foreach (var message in group)
+                                {
+                                    <MudChatBubble>
+                                        @message.Text
+                                    </MudChatBubble>
+                                }
+
+                                @if (firstMessage.IsUserBlocked)
+                                {
+                                    <MudChatFooter>
+                                        <MudText Typo="Typo.caption" Color="Color.Default">
+                                            @I18n.GetCommon("userHasBeenBlocked")
+                                        </MudText>
+                                    </MudChatFooter>
+                                }
+                                else if (!firstMessage.IsAuthorStillParticipant)
+                                {
+                                    <MudChatFooter>
+                                        <MudText Typo="Typo.caption" Color="Color.Default">
+                                            @I18n.GetCommon("userHasLeftEvent")
+                                        </MudText>
+                                    </MudChatFooter>
+                                }
+                            </MudChat>
+                        }
+                    }
+                </div>
+
+                @* New messages indicator *@
+                @if (hasUnreadMessages && !isNearBottom)
+                {
+                    <div class="new-messages-indicator">
+                        <MudButton Variant="Variant.Filled" 
+                                   Color="Color.Primary" 
+                                   StartIcon="@Icons.Material.Filled.ArrowDownward"
+                                   OnClick="@ScrollToBottomForced"
+                                   Size="Size.Small">
+                            @if (unreadMessageCount > 0)
+                            {
+                                <text>↓ @unreadMessageCount @(unreadMessageCount == 1 ? I18n.GetCommon("newMessage") : I18n.GetCommon("newMessages"))</text>
+                            }
+                            else
+                            {
+                                @I18n.GetCommon("newMessages")
+                            }
+                        </MudButton>
+                    </div>
+                }
+            </div>
+
+            @* Typing indicator *@
+            @if (usersTyping.Any())
+            {
+                <div class="typing-indicator">
+                    <MudText Typo="Typo.caption" Color="Color.Default" Class="px-3">
+                        <em>
+                            @if (usersTyping.Count == 1)
+                            {
+                                <text>@usersTyping.First().Value @I18n.GetCommon("isTyping")</text>
+                            }
+                            else if (usersTyping.Count == 2)
+                            {
+                                <text>@usersTyping.First().Value @I18n.GetCommon("and") @usersTyping.Skip(1).First().Value @I18n.GetCommon("areTyping")</text>
+                            }
+                            else
+                            {
+                                <text>@I18n.GetCommon("severalPeopleTyping")</text>
+                            }
+                        </em>
+                    </MudText>
+                </div>
+            }
+
+            @* Send message form - always at bottom *@
+            <div class="chat-input-container">
+                <EditForm Model="@sendMessageRequest" OnSubmit="HandleFormSubmit">
+                    <LocalizedDataAnnotationsValidator />
+
+                    @if (!string.IsNullOrEmpty(errorCode))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mb-3">
+                            @I18n.GetError(errorCode)
+                        </MudAlert>
+                    }
+
+                    <div class="d-flex">
+                        <MudTextField @ref="messageInputField" @bind-Value="sendMessageRequest.Text" Label="@I18n.GetCommon("message")"
+                            Placeholder="@I18n.GetCommon("typeMessage")" Variant="Variant.Outlined" MaxLength="1000"
+                            Counter="1000" Disabled="@isSubmitting" For="@(() => sendMessageRequest.Text)" Immediate="true"
+                            @onkeydown="HandleKeyDown" @oninput="HandleTyping" 
+                            Lines="1" AutoGrow="true" Class="flex-grow-1" />
+                        <MudIconButton OnClick="HandleSendMessage" Icon="@Icons.Material.Filled.Send"
+                            Variant="Variant.Filled" Color="Color.Primary"
+                            Disabled="@(isSubmitting || string.IsNullOrWhiteSpace(sendMessageRequest.Text))"
+                            aria-label="@I18n.GetCommon("send")" Class="chat-send-button">
+                        </MudIconButton>
+                    </div>
+                </EditForm>
+            </div>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired]
+    public string EventHash { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public int EventId { get; set; }
+
+    [Parameter, EditorRequired]
+    public bool IsParticipant { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private SendMessageRequest sendMessageRequest = new();
+    private List<MessageDto> messages = new();
+    private bool isSubmitting = false;
+    private bool isLoadingMessages = false;
+    private bool isLoadingMore = false;
+    private string? errorCode;
+    private string? loadErrorCode;
+    private int currentPage = 1;
+    private int pageSize = 50;
+    private int totalCount = 0;
+    private bool hasMoreMessages => messages.Count < totalCount;
+    private ElementReference chatContainer;
+    private MudTextField<string>? messageInputField;
+
+    private int? currentUserId;
+    // SignalR related fields
+    private bool isConnectedToSignalR = false;
+    private IDisposable? _messageSubscription;
+    private bool hasInitializedChat = false;
+    private bool isNearBottom = true;
+    private bool hasUnreadMessages = false;
+    private int unreadMessageCount = 0;
+    
+    // Typing indicators
+    private Dictionary<int, string> usersTyping = new();
+    private System.Threading.Timer? typingTimer;
+    private DateTime lastTypingNotification = DateTime.MinValue;
+    private const int TypingDebounceMs = 2000; // 2 seconds
+    
+    // Focus management (removed OnAfterRenderAsync to fix heap-locked errors)
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLanguageChanged += StateHasChanged;
+        // Get current user ID
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userIdClaim = authState.User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && int.TryParse(userIdClaim.Value, out var userId))
+        {
+            currentUserId = userId;
+        }
+
+
+        Logger.LogInformation("EventChat initializing for event {EventId}, IsParticipant: {IsParticipant}", EventId,
+        IsParticipant);
+
+        sendMessageRequest.EventId = EventId;
+
+        if (IsParticipant)
+        {
+            await InitializeChat();
+        }
+        else
+        {
+            Logger.LogInformation("User is not a participant in event {EventId}, skipping chat initialization", EventId);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // If user just became a participant, initialize chat
+        if (IsParticipant && !hasInitializedChat)
+        {
+            Logger.LogInformation("User became participant in event {EventId}, initializing chat", EventId);
+            await InitializeChat();
+        }
+        // If user is no longer a participant, cleanup
+        else if (!IsParticipant && hasInitializedChat)
+        {
+            Logger.LogInformation("User is no longer participant in event {EventId}, cleaning up chat", EventId);
+            await CleanupChat();
+        }
+    }
+
+    private async Task InitializeChat()
+    {
+        if (hasInitializedChat) return;
+
+        await LoadMessages();
+        await InitializeSignalR();
+        hasInitializedChat = true;
+    }
+
+    private async Task CleanupChat()
+    {
+        try
+        {
+            _messageSubscription?.Dispose();
+            if (isConnectedToSignalR)
+            {
+                await SignalRService.LeaveEventChatAsync(EventId);
+                isConnectedToSignalR = false;
+            }
+            messages.Clear();
+            hasInitializedChat = false;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cleaning up chat for event {EventId}", EventId);
+        }
+    }
+
+    private async Task InitializeSignalR()
+    {
+        try
+        {
+            // Ensure SignalR is connected
+            if (!SignalRService.IsConnected)
+            {
+                await SignalRService.StartAsync();
+            }
+
+            // Join this event's chat room
+            await SignalRService.JoinEventChatAsync(EventId);
+
+            // Subscribe to messages for this event
+            _messageSubscription = SignalRService.OnMessageReceived(EventId, async (message) =>
+            {
+                await HandleRealTimeMessage(message);
+            });
+
+            // Subscribe to message deletion events
+            SignalRService.OnMessageDeleted(EventId, async (messageId, reason) =>
+            {
+                await HandleMessageDeleted(messageId, reason);
+            });
+
+            // Subscribe to message flagged events
+            SignalRService.OnMessageFlagged(EventId, async (messageId, userId, warning) =>
+            {
+                await HandleMessageFlagged(messageId, userId, warning);
+            });
+
+            // Subscribe to typing events
+            SignalRService.OnUserTyping(EventId, async (userId, userName) =>
+            {
+                await HandleUserTyping(userId, userName);
+            });
+
+            SignalRService.OnUserStoppedTyping(EventId, async (userId) =>
+            {
+                await HandleUserStoppedTyping(userId);
+            });
+
+            isConnectedToSignalR = true;
+            Logger.LogInformation("SignalR initialized for event {EventId}", EventId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize SignalR for event {EventId}", EventId);
+            // Don't fail the component if SignalR fails
+            // User can still use regular polling/refresh
+        }
+    }
+
+    private async Task HandleRealTimeMessage(MessageDto message)
+    {
+        try
+        {
+            // Check if message already exists (avoid duplicates)
+            if (messages.Any(m => m.MessageId == message.MessageId))
+            {
+                Logger.LogDebug(
+                "Message {MessageId} already exists, skipping",
+                message.MessageId);
+                return;
+            }
+
+            // Add message to list
+            messages.Add(message);
+            totalCount++;
+
+            // Track unread messages if user is scrolled up
+            if (!isNearBottom && message.UserId != currentUserId)
+            {
+                unreadMessageCount++;
+                hasUnreadMessages = true;
+            }
+
+            // Trigger UI update
+            await InvokeAsync(StateHasChanged);
+
+            // Scroll to show new message
+            await Task.Delay(50);
+            await ScrollToBottom();
+
+            Logger.LogInformation(
+            "Added real-time message {MessageId} to event {EventId}",
+            message.MessageId, EventId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(
+            ex,
+            "Error handling real-time message {MessageId}",
+            message.MessageId);
+        }
+    }
+
+    private async Task HandleMessageDeleted(int messageId, string reason)
+    {
+        try
+        {
+            // Remove message from list
+            var message = messages.FirstOrDefault(m => m.MessageId == messageId);
+            if (message != null)
+            {
+                messages.Remove(message);
+                totalCount--;
+
+                // Show notification to user
+                var notificationMessage = currentUserId == message.UserId
+                    ? I18n.GetMessage("yourMessageWasDeleted") + ": " + reason
+                    : I18n.GetMessage("messageWasDeleted");
+
+                Snackbar.Add(notificationMessage, Severity.Warning, config =>
+                {
+                    config.VisibleStateDuration = 5000;
+                });
+
+                Logger.LogInformation(
+                    "Message {MessageId} deleted by moderation: {Reason}",
+                    messageId, reason);
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling message deletion for message {MessageId}", messageId);
+        }
+    }
+
+    private async Task HandleMessageFlagged(int messageId, int userId, string warning)
+    {
+        try
+        {
+            // Only show warning to the message author
+            if (currentUserId == userId)
+            {
+                Snackbar.Add(warning, Severity.Warning, config =>
+                {
+                    config.VisibleStateDuration = 8000;
+                    config.Icon = Icons.Material.Filled.Warning;
+                });
+
+                Logger.LogInformation(
+                    "Message {MessageId} flagged with warning: {Warning}",
+                    messageId, warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error handling message flagged for message {MessageId}", messageId);
+        }
+    }
+
+    private async Task HandleTyping()
+    {
+        if (!isConnectedToSignalR || string.IsNullOrWhiteSpace(sendMessageRequest.Text))
+        {
+            return;
+        }
+
+        var now = DateTime.Now;
+        
+        // Only send typing notification if enough time has passed (throttle)
+        if ((now - lastTypingNotification).TotalMilliseconds < TypingDebounceMs)
+        {
+            return;
+        }
+
+        lastTypingNotification = now;
+
+        // Get current user's display name
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var displayName = authState.User.Identity?.Name ?? "Unknown";
+
+        await SignalRService.NotifyTypingAsync(EventId, displayName);
+
+        // Reset the timer - if user stops typing for 2 seconds, notify stopped
+        typingTimer?.Dispose();
+        typingTimer = new System.Threading.Timer(async _ =>
+        {
+            await SignalRService.NotifyStoppedTypingAsync(EventId);
+            lastTypingNotification = DateTime.MinValue;
+        }, null, TypingDebounceMs, Timeout.Infinite);
+    }
+
+    private async Task HandleUserTyping(int userId, string userName)
+    {
+        // Don't show own typing indicator
+        if (userId == currentUserId)
+        {
+            return;
+        }
+
+        usersTyping[userId] = userName;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleUserStoppedTyping(int userId)
+    {
+        usersTyping.Remove(userId);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleScroll()
+    {
+        try
+        {
+            var result = await JSRuntime.InvokeAsync<bool>("eval",
+                @"(function() {
+                    var elem = document.querySelector('.chat-messages');
+                    if (!elem) return true;
+                    var isNear = (elem.scrollTop + elem.clientHeight) >= (elem.scrollHeight - 100);
+                    return isNear;
+                })()");
+
+            isNearBottom = result;
+
+            // Clear unread messages flag when user scrolls to bottom
+            if (isNearBottom)
+            {
+                hasUnreadMessages = false;
+                unreadMessageCount = 0;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to check scroll position");
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        // Only auto-scroll if user is near the bottom
+        if (!isNearBottom)
+        {
+            hasUnreadMessages = true;
+            StateHasChanged();
+            return;
+        }
+
+        await ScrollToBottomForced();
+    }
+
+    private async Task ScrollToBottomForced()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("eval", $"document.querySelector('.chat-messages').scrollTop = document.querySelector('.chat-messages').scrollHeight");
+            isNearBottom = true;
+            hasUnreadMessages = false;
+            unreadMessageCount = 0;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to scroll chat to bottom");
+        }
+    }
+
+    private async Task LoadMessages()
+    {
+        isLoadingMessages = true;
+        loadErrorCode = null;
+        currentPage = 1;
+        messages.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var result = await MessagesApiClient.GetEventMessagesAsync(EventHash, currentPage, pageSize);
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                messages = result.Value.Messages;
+                totalCount = result.Value.TotalCount;
+                Logger.LogInformation("Loaded {Count} messages for event {EventHash}", messages.Count, EventHash);
+            }
+            else
+            {
+                loadErrorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+                Logger.LogWarning("Failed to load messages for event {EventId}: {ErrorCode}", EventId, loadErrorCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            loadErrorCode = ErrorCodes.ServerError;
+            Logger.LogError(ex, "Error loading messages for event {EventId}", EventId);
+        }
+        finally
+        {
+            isLoadingMessages = false;
+            StateHasChanged();
+            await Task.Delay(100); // Small delay to ensure DOM is updated
+            await ScrollToBottomForced(); // Always scroll to bottom on initial load
+        }
+    }
+
+    private async Task LoadMoreMessages()
+    {
+        if (isLoadingMore || !hasMoreMessages) return;
+
+        isLoadingMore = true;
+        StateHasChanged();
+
+        try
+        {
+            currentPage++;
+            var result = await MessagesApiClient.GetEventMessagesAsync(EventHash, currentPage, pageSize);
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                messages.AddRange(result.Value.Messages);
+                totalCount = result.Value.TotalCount;
+                Logger.LogInformation("Loaded page {Page} with {Count} more messages", currentPage, result.Value.Messages.Count);
+            }
+            else
+            {
+                currentPage--; // Revert page number on failure
+                Snackbar.Add(I18n.GetError(result.Error?.Code ?? ErrorCodes.ServerError), Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            currentPage--; // Revert page number on failure
+            Logger.LogError(ex, "Error loading more messages for event {EventId}", EventId);
+            Snackbar.Add(I18n.GetError(ErrorCodes.ServerError), Severity.Error);
+        }
+        finally
+        {
+            isLoadingMore = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSendMessage()
+    {
+        if (isSubmitting) return;
+
+        isSubmitting = true;
+        errorCode = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MessagesApiClient.SendMessageAsync(sendMessageRequest);
+
+            if (result.IsSuccess && result.Value != null)
+            {
+                var response = result.Value;
+
+                // Check if message was blocked
+                if (response.WasBlocked)
+                {
+                    Logger.LogWarning("Message was blocked by moderation for event {EventId}", EventId);
+                    await ModerationAlert.ShowBlockedAlert(response);
+                    // Don't clear text field - user can edit and resend
+                    return;
+                }
+
+                // Check if message was flagged
+                if (response.WasFlagged && !string.IsNullOrEmpty(response.ModerationWarning))
+                {
+                    Logger.LogInformation("Message was flagged by moderation for event {EventId}", EventId);
+                    await ModerationAlert.ShowWarningAlert(response);
+                }
+
+                // Clear text field
+                sendMessageRequest.Text = string.Empty;
+
+                // Return focus to input field after a delay (avoids heap-locked errors)
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(150);
+                    await InvokeAsync(async () =>
+                    {
+                        try
+                        {
+                            if (messageInputField != null)
+                            {
+                                await messageInputField.FocusAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogDebug(ex, "Failed to focus input field");
+                        }
+                    });
+                });
+
+                // Message will be added automatically via SignalR broadcast
+                // This prevents duplication and ensures consistency
+
+                Logger.LogInformation("Message sent successfully to event {EventId}", EventId);
+
+                // Scroll to show the sent message (always scroll when user sends)
+                await Task.Delay(50);
+                await ScrollToBottomForced();
+            }
+            else
+            {
+                errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+                Logger.LogWarning("Failed to send message to event {EventId}: {ErrorCode}", EventId, errorCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorCode = ErrorCodes.ServerError;
+            Logger.LogError(ex, "Error sending message to event {EventId}", EventId);
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleFormSubmit()
+    {
+        // Prevent Enter key from submitting the form
+        // Submission only happens via HandleKeyDown or button click
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        // Enter without Shift = send message
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            // Only send if there's text and not currently submitting
+            if (!string.IsNullOrWhiteSpace(sendMessageRequest.Text) && !isSubmitting)
+            {
+                await HandleSendMessage();
+            }
+        }
+        // Shift+Enter = new line (default behavior for multiline TextField)
+    }
+
+    private List<IGrouping<int, MessageDto>> GetGroupedMessages()
+    {
+        // Group consecutive messages from the same user within 5 minutes
+        var grouped = new List<IGrouping<int, MessageDto>>();
+        var currentGroup = new List<MessageDto>();
+        int? lastUserId = null;
+        DateTime? lastMessageTime = null;
+
+        foreach (var message in messages.OrderBy(m => m.SentAt))
+        {
+            // Break group if different user OR more than 5 minutes since last message
+            bool shouldBreakGroup = lastUserId != null && 
+                (lastUserId != message.UserId || 
+                 (lastMessageTime.HasValue && (message.SentAt - lastMessageTime.Value).TotalMinutes > 5));
+
+            if (shouldBreakGroup)
+            {
+                if (currentGroup.Any() && lastUserId.HasValue)
+                {
+                    grouped.Add(new MessageGroup(lastUserId.Value, currentGroup));
+                }
+                currentGroup = new List<MessageDto> { message };
+            }
+            else
+            {
+                currentGroup.Add(message);
+            }
+
+            lastUserId = message.UserId;
+            lastMessageTime = message.SentAt;
+        }
+
+        // Add the last group
+        if (currentGroup.Any() && lastUserId.HasValue)
+        {
+            grouped.Add(new MessageGroup(lastUserId.Value, currentGroup));
+        }
+
+        return grouped;
+    }
+
+    private ChatBubblePosition DeterminePosition(int userId)
+    {
+        return userId == currentUserId
+        ? ChatBubblePosition.End
+        : ChatBubblePosition.Start;
+    }
+
+    private string FormatTime(DateTime sentAt)
+    {
+        var localTime = sentAt.ToLocalTime();
+        var now = DateTime.Now;
+        var diff = now - localTime;
+
+        // Today - show time only
+        if (localTime.Date == now.Date)
+        {
+            return localTime.ToString("HH:mm");
+        }
+
+        // Yesterday
+        if (localTime.Date == now.Date.AddDays(-1))
+        {
+            return $"{I18n.GetCommon("yesterday")} {localTime:HH:mm}";
+        }
+
+        // Within last 7 days - show day name
+        if (diff.TotalDays < 7)
+        {
+            var dayName = I18n.GetCommon(localTime.DayOfWeek.ToString().ToLower());
+            return $"{dayName} {localTime:HH:mm}";
+        }
+
+        // Older - show date
+        return localTime.ToString("MMM d, HH:mm");
+    }
+
+    private async Task HandleClose()
+    {
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    // Helper class for grouping messages
+    private class MessageGroup : IGrouping<int, MessageDto>
+    {
+        private readonly int _key;
+        private readonly IEnumerable<MessageDto> _messages;
+
+        public MessageGroup(int key, IEnumerable<MessageDto> messages)
+        {
+            _key = key;
+            _messages = messages;
+        }
+
+        public int Key => _key;
+        public IEnumerator<MessageDto> GetEnumerator() => _messages.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            // Unsubscribe from language changes
+            I18n.OnLanguageChanged -= StateHasChanged;
+
+            // Unsubscribe from messages
+            _messageSubscription?.Dispose();
+
+            // Leave event chat room
+            if (isConnectedToSignalR)
+            {
+                _ = SignalRService.LeaveEventChatAsync(EventId);
+            }
+
+            Logger.LogInformation("Disposed EventChat for event {EventId}", EventId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error disposing EventChat");
+        }
+    }
+}

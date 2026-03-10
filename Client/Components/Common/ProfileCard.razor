@@ -1,0 +1,134 @@
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Helpers
+@using Client.Services
+@inject II18nService I18n
+
+<div class="profile-card-container @GetSizeClass()">
+    <div class="profile-card-image-wrapper">
+        @if (!string.IsNullOrEmpty(ProfileImageUrl))
+        {
+            <MudAvatar Size="@GetAvatarSize()" Class="profile-card-avatar">
+                <MudImage Src="@ProfileImageUrl" Alt="@DisplayName" />
+            </MudAvatar>
+        }
+        else
+        {
+            <MudAvatar Color="@(IsBlocked? Color.Error: Color.Primary)" Size="@GetAvatarSize()" Class="profile-card-avatar"
+                       Style="@GetAvatarFontSize()">
+                @UserHelper.GetInitials(DisplayName)
+            </MudAvatar>
+        }
+
+        @* Profile Badges - Below the circle *@
+        <ProfileBadges IsVerified="@IsVerified" Gender="@Gender" BirthDate="@GetBirthDateFromAge()"
+                       IsBlocked="@IsBlocked" ShowBlocked="true" Size="@GetProfileBadgeSize()"
+                       ContainerClass="profile-card-badges" />
+    </div>
+
+    @if (ShowName)
+    {
+        <MudText Typo="@GetNameTextSize()" Align="Align.Center" Class="mt-2">
+            @DisplayName
+        </MudText>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string? ProfileImageUrl { get; set; }
+
+    [Parameter, EditorRequired]
+    public string DisplayName { get; set; } = string.Empty;
+
+    [Parameter]
+    public int? Age { get; set; }
+
+    [Parameter]
+    public Gender? Gender { get; set; }
+
+    [Parameter]
+    public bool IsVerified { get; set; }
+
+    [Parameter]
+    public bool IsBlocked { get; set; }
+
+    [Parameter]
+    public ProfileCardSize Size { get; set; } = ProfileCardSize.Medium;
+
+    [Parameter]
+    public bool ShowName { get; set; } = true;
+
+    [Parameter]
+    public DateTime? BirthDate { get; set; }
+
+    private DateTime? GetBirthDateFromAge()
+    {
+        // If BirthDate is provided directly, use it
+        if (BirthDate.HasValue)
+            return BirthDate;
+
+        // Otherwise calculate approximate birthdate from age
+        if (Age.HasValue && Age.Value > 0)
+            return DateTime.Today.AddYears(-Age.Value);
+
+        return null;
+    }
+
+    private ProfileBadges.BadgeSize GetProfileBadgeSize()
+    {
+        return Size switch
+        {
+            ProfileCardSize.Small => ProfileBadges.BadgeSize.Small,
+            ProfileCardSize.Large => ProfileBadges.BadgeSize.Large,
+            _ => ProfileBadges.BadgeSize.Medium
+        };
+    }
+
+    private string GetSizeClass()
+    {
+        return Size switch
+        {
+            ProfileCardSize.Small => "profile-card-small",
+            ProfileCardSize.Large => "profile-card-large",
+            _ => "profile-card-medium"
+        };
+    }
+
+    private Size GetAvatarSize()
+    {
+        return Size switch
+        {
+            ProfileCardSize.Small => MudBlazor.Size.Large,
+            ProfileCardSize.Large => MudBlazor.Size.Large,
+            _ => MudBlazor.Size.Large
+        };
+    }
+
+    private string GetAvatarFontSize()
+    {
+        return Size switch
+        {
+            ProfileCardSize.Small => "font-size: 1.5rem;",
+            ProfileCardSize.Large => "font-size: 3rem;",
+            _ => "font-size: 2rem;"
+        };
+    }
+
+    private Typo GetNameTextSize()
+    {
+        return Size switch
+        {
+            ProfileCardSize.Small => Typo.body2,
+            ProfileCardSize.Large => Typo.h6,
+            _ => Typo.body1
+        };
+    }
+
+    public enum ProfileCardSize
+    {
+        Small,
+        Medium,
+        Large
+    }
+}

@@ -1,0 +1,206 @@
+@using Microsoft.JSInterop
+@using Client.Services
+@namespace Client.Components.Common
+@inject IJSRuntime JS
+@inject II18nService I18n
+
+<MudField Label="@GetLabelText()" Variant="Variant.Outlined" Margin="Margin.Dense" Class="@Class" Disabled="@Disabled">
+    <div class="range-slider-field-content">
+        <div class="@("range-slider-wrapper" + (Disabled ? " disabled" : ""))">
+            <div class="range-slider-track">
+                <div class="range-slider-range" style="left: @GetRangeLeftPercent()%; width: @GetRangeWidthPercent()%;">
+                </div>
+            </div>
+            <input @ref="minInput" type="range" class="range-slider-input range-slider-min" min="@Min" max="@Max"
+                   step="@Step" value="@MinValue" @oninput="HandleMinChange" disabled="@Disabled" />
+            <input @ref="maxInput" type="range" class="range-slider-input range-slider-max" min="@Min" max="@Max"
+                   step="@Step" value="@MaxValue" @oninput="HandleMaxChange" disabled="@Disabled" />
+        </div>
+    </div>
+</MudField>
+
+@code {
+    public enum SliderType
+    {
+        Age,
+        Participants
+    }
+
+    private ElementReference minInput;
+    private ElementReference maxInput;
+
+    [Parameter]
+    public int Min { get; set; } = 0;
+
+    [Parameter]
+    public int Max { get; set; } = 99;
+
+    [Parameter]
+    public int Step { get; set; } = 1;
+
+    [Parameter]
+    public int MinValue { get; set; }
+
+    [Parameter]
+    public int MaxValue { get; set; }
+
+    [Parameter]
+    public EventCallback<int> MinValueChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<int> MaxValueChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnChange { get; set; }
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public int? UserAge { get; set; }
+
+    [Parameter]
+    public int? MinValueMax { get; set; } // Maximum allowed value for MinValue slider
+
+    [Parameter]
+    public int? MaxValueMin { get; set; } // Minimum allowed value for MaxValue slider
+
+    [Parameter]
+    public SliderType Type { get; set; } = SliderType.Age;
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter]
+    public bool Disabled { get; set; } = false;
+
+    private async Task HandleMinChange(ChangeEventArgs e)
+    {
+        if (Disabled) return;
+
+        if (int.TryParse(e.Value?.ToString(), out int newMin))
+        {
+            // If trying to go past max slider, clamp it
+            if (newMin >= MaxValue)
+            {
+                newMin = MaxValue - Step;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", minInput, newMin);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            // Apply MinValueMax constraint (e.g., youngest participant age)
+            if (MinValueMax.HasValue && newMin > MinValueMax.Value)
+            {
+                newMin = MinValueMax.Value;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", minInput, newMin);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            // Age-specific: If user has an age, min cannot be higher than their age
+            if (Type == SliderType.Age && UserAge.HasValue && newMin > UserAge.Value)
+            {
+                newMin = UserAge.Value;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", minInput, newMin);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            await MinValueChanged.InvokeAsync(newMin);
+            await OnChange.InvokeAsync();
+        }
+    }
+
+    private async Task HandleMaxChange(ChangeEventArgs e)
+    {
+        if (Disabled) return;
+
+        if (int.TryParse(e.Value?.ToString(), out int newMax))
+        {
+            // If trying to go past min slider, clamp it
+            if (newMax <= MinValue)
+            {
+                newMax = MinValue + Step;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", maxInput, newMax);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            // Apply MaxValueMin constraint (e.g., oldest participant age or current participant count)
+            if (MaxValueMin.HasValue && newMax < MaxValueMin.Value)
+            {
+                newMax = MaxValueMin.Value;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", maxInput, newMax);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            // Age-specific: If user has an age, max cannot be lower than their age
+            if (Type == SliderType.Age && UserAge.HasValue && newMax < UserAge.Value)
+            {
+                newMax = UserAge.Value;
+                try
+                {
+                    await JS.InvokeVoidAsync("setElementValue", maxInput, newMax);
+                }
+                catch
+                {
+                    // Fallback if JS fails
+                }
+            }
+
+            await MaxValueChanged.InvokeAsync(newMax);
+            await OnChange.InvokeAsync();
+        }
+    }
+
+    private string GetRangeLeftPercent()
+    {
+        var range = Max - Min;
+        if (range == 0) return "0";
+        return ((MinValue - Min) * 100.0 / range).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string GetRangeWidthPercent()
+    {
+        var range = Max - Min;
+        if (range == 0) return "0";
+        return ((MaxValue - MinValue) * 100.0 / range).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string GetLabelText()
+    {
+        // For Age slider, show "All" / "Alla" when range is 18-99 (everyone welcome)
+        if (Type == SliderType.Age && MinValue == Min && MaxValue == Max)
+        {
+            return $"{Label} | {I18n.GetCommon("all")}";
+        }
+        return $"{Label} | {MinValue}-{MaxValue}";
+    }
+}

@@ -1,0 +1,120 @@
+@page "/events/create"
+@using Shared.Contracts.Events
+@using Shared.Common.Constants
+@using Shared.Enums
+@using Shared.Extensions
+@using Client.Components.Events
+@using Client.Components.Common
+@using Client.Services.ApiClients
+@using Client.Services
+@using Microsoft.AspNetCore.Authorization
+@using static Client.Components.Events.CreateEventForm
+@attribute [Authorize]
+@implements IDisposable
+@inject IEventsApiClient EventsApiClient
+@inject NavigationManager Navigation
+@inject II18nService I18n
+@inject ILogger<CreateEvent> Logger
+@inject ISnackbar Snackbar
+
+<PageTitle>@I18n.GetCommon("createEvent")</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <div class="page-title-wrapper">
+        <MudText Typo="Typo.h3" Class="page-title">@I18n.GetCommon("createEvent")</MudText>
+    </div>
+
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+        OnClick="@(() => Navigation.NavigateTo("/"))" Class="mb-3">
+        @I18n.GetCommon("back")
+    </MudButton>
+
+    @if (!string.IsNullOrEmpty(errorCode))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">
+            @I18n.GetError(errorCode)
+        </MudAlert>
+    }
+
+    <CreateEventForm CreateEventRequest="@createEventRequest" Categories="@categories" IsLoading="@isLoading"
+        OnSubmit="@HandleCreateEvent" />
+</MudContainer>
+
+@code {
+    private CreateEventRequest createEventRequest = new();
+    private List<CategoryDto> categories = new();
+    private string? errorCode;
+    private bool isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        I18n.OnLanguageChanged += OnLanguageChangedHandler;
+        await LoadCategories();
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= OnLanguageChangedHandler;
+    }
+
+    private void OnLanguageChangedHandler()
+    {
+        LoadCategories().GetAwaiter().GetResult();
+        StateHasChanged();
+    }
+
+    private async Task LoadCategories()
+    {
+        // Load categories from enum - single source of truth
+        categories = CategoryTypeExtensions.GetAll()
+        .Select(c => new CategoryDto
+        {
+            Id = (int)c,
+            Name = I18n.GetCommon(c.GetLocalizationKey())
+        })
+        .ToList();
+
+        await Task.CompletedTask;
+    }
+
+    private async Task HandleCreateEvent(CreateEventRequest request)
+    {
+        isLoading = true;
+        errorCode = null;
+
+        Logger.LogInformation("User attempting to create event: {Title}", request.Title);
+
+        var result = await EventsApiClient.CreateEventAsync(request);
+
+        if (result.IsFailure)
+        {
+            Logger.LogWarning("Event creation failed. Error: {ErrorCode}", result.Error?.Code);
+
+            // Don't show error message for validation errors - fields are already highlighted
+            if (result.Error?.Code != ErrorCodes.ValidationError)
+            {
+                errorCode = result.Error?.Code ?? ErrorCodes.ServerError;
+            }
+
+            isLoading = false;
+            return;
+        }
+
+        Logger.LogInformation("Event created successfully. Event ID: {EventId}", result.Value?.EventId);
+
+        // Validate event ID before navigation
+        if (result.Value?.EventId == null || result.Value.EventId <= 0)
+        {
+            Logger.LogError("Event created but received invalid EventId: {EventId}", result.Value?.EventId);
+            errorCode = ErrorCodes.EventNavigationFailed;
+            isLoading = false;
+            return;
+        }
+
+        // Show success snackbar
+        Snackbar.Add(I18n.GetMessage(MessageKeys.EventCreatedSuccess), Severity.Success);
+
+        // Navigate to the created event details page
+        Navigation.NavigateTo($"/events/{result.Value.EventHash}", replace: true);
+    }
+}
