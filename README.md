@@ -43,30 +43,3 @@ Meeps/
 ├── Client/       # Blazor WebAssembly – pages and components
 └── Shared/       # Shared contracts (DTOs, Result pattern, error codes)
 ```
-
-## Getting Started
-
-### Prerequisites
-
-- .NET 9 SDK
-- SQL Server LocalDB
-
-### Installation
-
-1. Clone the repository
-2. Set up User Secrets in the `API/` folder:
-   ```bash
-   dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\mssqllocaldb;Database=MeepsDb;Trusted_Connection=True"
-   dotnet user-secrets set "Jwt:Key" "your-secret-key-at-least-32-characters-long"
-   ```
-3. Apply database migrations:
-   ```bash
-   cd API
-   dotnet ef database update
-   ```
-4. Start the project:
-   ```bash
-   .\watch.bat
-   ```
-
-The app runs at **https://localhost:7000**
